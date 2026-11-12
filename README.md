@@ -211,6 +211,9 @@ docs/                  安装/使用/配置说明
 ## 测试
 
 ```powershell
+# 可选：重新生成不含第三方论文内容的合成 PDF fixture
+node scripts\make-sample-fixture.mjs
+
 node scripts\build-tests.mjs
 node tests\run-all.mjs
 ```

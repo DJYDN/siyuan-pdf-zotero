@@ -28,9 +28,9 @@ function attachment(overrides = {}) {
 test("loadAttachmentBytes reads a real external PDF from disk without copying it", async () => {
     const result = await loadAttachmentBytes(attachment());
     assert.equal(String.fromCharCode(...result.bytes.slice(0, 5)), "%PDF-");
-    assert.equal(result.bytes.length, 144786);
+    assert.ok(result.bytes.length > 10_000);
     assert.match(result.fingerprint, /^[0-9a-f]{64}$/);
-    assert.equal(result.size, 144786);
+    assert.equal(result.size, result.bytes.length);
     assert.equal(result.changed, false);
 });
 
