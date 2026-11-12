@@ -1,0 +1,90 @@
+#!/usr/bin/env node
+import {execFileSync, spawnSync} from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+
+const root = path.resolve(import.meta.dirname, "..");
+const dist = path.join(root, "dist");
+const pdfjsRoot = path.join(root, "node_modules", "pdfjs-dist");
+
+function findEsbuild() {
+    const candidates = [
+        path.join(root, "node_modules", "@esbuild", "win32-x64", "esbuild.exe"),
+        path.join(root, "node_modules", "@esbuild", "linux-x64", "bin", "esbuild"),
+        path.join(root, "node_modules", "@esbuild", "darwin-arm64", "bin", "esbuild"),
+        path.join(root, "node_modules", ".bin", "esbuild"),
+    ];
+    for (const candidate of candidates) {
+        if (fs.existsSync(candidate)) {
+            return candidate;
+        }
+    }
+    return "esbuild";
+}
+
+function run() {
+    fs.rmSync(dist, {recursive: true, force: true});
+    fs.mkdirSync(dist, {recursive: true});
+
+    const esbuild = findEsbuild();
+    const args = [
+        path.join(root, "src", "index.ts"),
+        "--bundle",
+        "--minify",
+        "--sourcemap",
+        "--format=cjs",
+        "--platform=browser",
+        "--target=chrome120",
+        "--external:siyuan",
+        "--outfile=" + path.join(dist, "index.js"),
+        "--log-level=info",
+    ];
+    console.log(`[build] ${esbuild} ${args.join(" ")}`);
+    const result = spawnSync(esbuild, args, {stdio: "inherit", cwd: root});
+    if (result.error) {
+        console.error("[build] esbuild spawn failed:", result.error.message);
+        console.error("[build] Run this exact command manually:");
+        console.error(`"${esbuild}" ${args.map(a => a.includes(" ") ? `"${a}"` : a).join(" ")}`);
+        process.exit(1);
+    }
+    if (result.status !== 0) {
+        process.exit(result.status || 1);
+    }
+
+    const files = [
+        ["plugin.json", "plugin.json"],
+        ["icon.png", "icon.png"],
+        ["README.md", "README.md"],
+    ];
+    for (const [from, to] of files) {
+        const src = path.join(root, from);
+        if (!fs.existsSync(src)) {
+            console.warn(`[build] missing optional file: ${from}`);
+            continue;
+        }
+        fs.copyFileSync(src, path.join(dist, to));
+    }
+    fs.cpSync(path.join(root, "i18n"), path.join(dist, "i18n"), {recursive: true});
+    fs.cpSync(path.join(root, "styles"), path.join(dist, "styles"), {recursive: true});
+
+    const pdfjsFiles = [
+        ["build/pdf.min.mjs", "pdf.min.mjs"],
+        ["build/pdf.worker.min.mjs", "pdf.worker.min.mjs"],
+    ];
+    for (const [from, to] of pdfjsFiles) {
+        fs.copyFileSync(path.join(pdfjsRoot, from), path.join(dist, to));
+    }
+    for (const dir of ["cmaps", "standard_fonts", "wasm", "iccs"]) {
+        fs.cpSync(path.join(pdfjsRoot, dir), path.join(dist, dir), {recursive: true});
+    }
+    const katexRoot = path.join(root, "node_modules", "katex", "dist");
+    fs.copyFileSync(path.join(katexRoot, "katex.min.css"), path.join(dist, "katex.min.css"));
+    fs.cpSync(path.join(katexRoot, "fonts"), path.join(dist, "fonts"), {recursive: true});
+    console.log("[build] dist ready:", dist);
+    const size = (p) => (fs.statSync(p).size / 1024 / 1024).toFixed(2) + " MiB";
+    console.log(`[build] dist/index.js ${size(path.join(dist, "index.js"))}`);
+    console.log(`[build] dist/pdf.worker.min.mjs ${size(path.join(dist, "pdf.worker.min.mjs"))}`);
+}
+
+run();

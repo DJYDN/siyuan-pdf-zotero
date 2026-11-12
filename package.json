@@ -1,0 +1,25 @@
+{
+  "name": "siyuan-pdf-zotero",
+  "version": "0.9.5",
+  "private": true,
+  "description": "Lightweight SiYuan PDF reader with PDF++ annotations, Zotero citations and CSL bibliographies",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/build-tests.mjs && node tests/run-all.mjs",
+    "install-plugin": "node scripts/install-plugin.mjs",
+    "test:e2e": "node tests/e2e/run-e2e.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.12",
+    "esbuild": "0.28.2",
+    "pdfjs-dist": "6.4.299",
+    "siyuan": "1.2.9",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "citeproc": "^2.4.63",
+    "katex": "^0.16.22"
+  }
+}

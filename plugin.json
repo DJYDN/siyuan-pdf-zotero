@@ -1,0 +1,33 @@
+{
+  "name": "siyuan-pdf-zotero",
+  "author": "SiYuanArticleManger",
+  "url": "https://github.com/siyuan-note/plugin-sample",
+  "version": "0.9.5",
+  "minAppVersion": "3.8.7",
+  "backends": [
+    "windows"
+  ],
+  "frontends": [
+    "desktop",
+    "browser-desktop"
+  ],
+  "displayName": {
+    "default": "PDF × Zotero",
+    "zh_CN": "PDF × Zotero"
+  },
+  "description": {
+    "default": "Lightweight PDF reader with PDF++ style excerpts, back-jumps, Zotero citations and CSL bibliographies.",
+    "zh_CN": "轻量 PDF 阅读、PDF++ 式摘录回跳、Zotero 引文与 CSL 参考文献。"
+  },
+  "readme": {
+    "default": "README.md",
+    "zh_CN": "README.md"
+  },
+  "icon": "icon.png",
+  "keywords": [
+    "pdf",
+    "zotero",
+    "annotation",
+    "citation"
+  ]
+}
