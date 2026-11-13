@@ -2930,11 +2930,28 @@ export class PdfReader {
             const waitTimer = window.setInterval(() => {
                 hud.setWaiting(Math.floor((Date.now() - waitStartedAt) / 1000));
             }, 1000);
+            let progressLogCount = 0;
+            let progressPollBusy = false;
+            const progressTimer = window.setInterval(async () => {
+                if (progressPollBusy) return;
+                progressPollBusy = true;
+                try {
+                    const progress = await client.progress();
+                    if (!progress) return;
+                    if (progress.progress > 0) hud.setProgress(progress.progress);
+                    if (progress.logs.length < progressLogCount) progressLogCount = 0;
+                    for (const line of progress.logs.slice(progressLogCount)) hud.addLog(line);
+                    progressLogCount = progress.logs.length;
+                } finally {
+                    progressPollBusy = false;
+                }
+            }, 1200);
             let task: Awaited<ReturnType<typeof client.start>>;
             try {
                 task = await client.start(attachment.path, fileName, settings);
             } finally {
                 window.clearInterval(waitTimer);
+                window.clearInterval(progressTimer);
             }
             if (!task.taskId) {
                 task.progress = 100;
@@ -2983,6 +3000,10 @@ export class PdfReader {
         const settings = this.host.store.state.settings;
         const attachment = this.host.store.getAttachment(this.data.attachmentId);
         if (!attachment) return;
+        if (!settings.doc2xConfigured) {
+            showMessage("请先在设置 → Doc2X 勾选“我已配置完成解析&翻译设置”", 4000, "error");
+            return;
+        }
         const outputDir = doc2xOutputPath(attachment.id, attachment.fingerprint, settings);
         const fs = requireNode("fs");
         const path = requireNode("path");

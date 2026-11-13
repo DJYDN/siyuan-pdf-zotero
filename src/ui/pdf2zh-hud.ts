@@ -77,6 +77,15 @@ export class Pdf2zhHud {
         this.logElement.scrollTop = this.logElement.scrollHeight;
     }
 
+    addLog(line: string): void {
+        const value = String(line || "").trim();
+        if (!value) return;
+        this.logs.push(`${new Date().toLocaleTimeString()}  ${value}`);
+        if (this.logs.length > 80) this.logs.shift();
+        this.logElement.textContent = this.logs.join("\n");
+        this.logElement.scrollTop = this.logElement.scrollHeight;
+    }
+
     setWaiting(seconds: number): void {
         this.detail.textContent = `${this.provider} 正在翻译中… 已等待 ${seconds} 秒（页数较多时可能需要数分钟）`;
     }

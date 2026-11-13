@@ -780,9 +780,9 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
         });
     }
 
-    openCitationDialog(citationId?: string): void {
+    openCitationDialog(citationId?: string, initialItemKeys: string[] = []): void {
         const requestedId = citationId || "";
-        if (this.citationDialog?.element.isConnected && this.citationDialogId === requestedId) {
+        if (this.citationDialog?.element.isConnected && this.citationDialogId === requestedId && !initialItemKeys.length) {
             this.logDebug("citation.dialog.reused", {citationId: requestedId});
             this.citationDialog.element.querySelector<HTMLInputElement>('[data-role="citation-search"]')?.focus();
             return;
@@ -796,6 +796,7 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
         this.citationDialog = openCitationDialog({
             store: this.store,
             citation: citationId ? this.store.state.citations[citationId] : undefined,
+            initialItemKeys,
         });
         this.citationDialogId = requestedId;
         this.logDebug("citation.dialog.opened", {citationId: requestedId});

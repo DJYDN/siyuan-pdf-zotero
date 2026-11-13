@@ -21,7 +21,8 @@ function arg(name, fallback = "") {
     return index >= 0 ? args[index + 1] : fallback;
 }
 
-const workspace = path.resolve(arg("workspace", path.join(process.env.USERPROFILE || process.env.HOME || ".", "SiYuan", "Dataset")));
+const defaultWorkspace = process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "SiYuan", "Dataset") : "C:\\SiYuan\\Dataset";
+const workspace = path.resolve(arg("workspace", defaultWorkspace));
 const confPath = path.join(workspace, "conf", "conf.json");
 const baseUrl = arg("base-url", "http://127.0.0.1:6806");
 let token = arg("token", "");

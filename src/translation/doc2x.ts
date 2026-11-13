@@ -216,7 +216,8 @@ export async function translateWithDoc2x(
     }
     const result = await run(resolveCommand(settings.doc2xCommand || "doc2x"), args, 45 * 60_000);
     if (result.code !== 0) {
-        throw new Error((result.stderr || result.stdout || `Doc2X CLI 退出码 ${result.code}`).slice(0, 12_000));
+        const log = writeDoc2xErrorLog(settings, "translate", result);
+        throw new Error(`${(result.stderr || result.stdout || `Doc2X CLI 退出码 ${result.code}`).slice(0, 12_000)}\n${log ? `错误日志：${log}` : ""}`);
     }
     const payload = parseJson(result.stdout);
     let files: string[] = [];
@@ -240,8 +241,143 @@ export async function translateWithDoc2x(
     return {files, stdout: result.stdout, stderr: result.stderr};
 }
 
+export function doc2xErrorLogDir(settings: Settings): string {
+    const path = requireNode("path");
+    return path.join(translationOutputDir(settings), "doc2x-errors");
+}
+
+export function writeDoc2xErrorLog(settings: Settings, command: string, result: {code: number; stdout: string; stderr: string; timedOut: boolean}): string {
+    try {
+        const fs = requireNode("fs");
+        const path = requireNode("path");
+        const dir = doc2xErrorLogDir(settings);
+        fs.mkdirSync(dir, {recursive: true});
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const file = path.join(dir, `doc2x-${stamp}.log`);
+        const content = [
+            `command: doc2x ${command}`,
+            `time: ${new Date().toISOString()}`,
+            `exitCode: ${result.code}`,
+            `timedOut: ${result.timedOut}`,
+            "--- stdout ---",
+            result.stdout,
+            "--- stderr ---",
+            result.stderr,
+        ].join("\n");
+        fs.writeFileSync(file, content, "utf8");
+        return file;
+    } catch {
+        return "";
+    }
+}
+
+function collectFilesByExtension(dir: string, ext: string): string[] {
+    const fs = requireNode("fs");
+    const path = requireNode("path");
+    if (!fs?.readdirSync || !fs.existsSync(dir)) return [];
+    const result: string[] = [];
+    const walk = (current: string) => {
+        let entries: any[] = [];
+        try {
+            entries = fs.readdirSync(current, {withFileTypes: true});
+        } catch {
+            return;
+        }
+        for (const entry of entries) {
+            const full = path.join(current, entry.name);
+            if (entry.isDirectory()) walk(full);
+            else if (entry.name.toLowerCase().endsWith(ext)) result.push(full);
+        }
+    };
+    walk(dir);
+    return result.sort();
+}
+
+function doc2xCommonArgs(settings: Settings): string[] {
+    const args = ["--auth-mode", settings.doc2xAuthMode || "oauth"];
+    if (settings.doc2xModel?.trim()) args.push("--target-model", settings.doc2xModel.trim());
+    if (settings.doc2xTermId?.trim()) args.push("--term-id", settings.doc2xTermId.trim());
+    if (settings.doc2xFontColor) args.push("--font-color-extraction");
+    if (settings.doc2xContextual) args.push("--contextual-translation");
+    if (settings.doc2xIgnoreTypes?.length) args.push("--ignore-translate-types", ...settings.doc2xIgnoreTypes);
+    return args;
+}
+
+export interface Doc2xMarkdownResult {
+    files: string[];
+    markdownFiles: string[];
+    stdout: string;
+    stderr: string;
+}
+
+export async function parseWithDoc2x(
+    settings: Settings,
+    inputPath: string,
+    outputDir: string,
+): Promise<Doc2xMarkdownResult> {
+    const fs = requireNode("fs");
+    const path = requireNode("path");
+    fs.mkdirSync(outputDir, {recursive: true});
+    const args = [
+        "parse",
+        inputPath,
+        "--auth-mode", settings.doc2xAuthMode || "oauth",
+        "--to", "md",
+        "--out", outputDir,
+        "--json",
+        "--overwrite",
+    ];
+    const command = `parse ${inputPath}`;
+    const result = await run(resolveCommand(settings.doc2xCommand || "doc2x"), args, 45 * 60_000);
+    if (result.code !== 0) {
+        const log = writeDoc2xErrorLog(settings, command, result);
+        throw new Error(`${(result.stderr || result.stdout || `Doc2X CLI 退出码 ${result.code}`).slice(0, 12000)}\n${log ? `错误日志：${log}` : ""}`);
+    }
+    const files = collectFilesByExtension(outputDir, ".md");
+    if (!files.length) throw new Error("Doc2X 解析完成，但没有找到 Markdown 文件");
+    return {files, markdownFiles: files, stdout: result.stdout, stderr: result.stderr};
+}
+
+export async function translateWithDoc2xMarkdown(
+    settings: Settings,
+    inputPath: string,
+    outputDir: string,
+    convert: "origin" | "translate" | "both" = "translate",
+): Promise<Doc2xMarkdownResult> {
+    const fs = requireNode("fs");
+    const path = requireNode("path");
+    fs.mkdirSync(outputDir, {recursive: true});
+    const args = [
+        "translate",
+        inputPath,
+        ...doc2xCommonArgs(settings),
+        "--target-language", settings.doc2xTargetLang || "zh",
+        "--translate-type", "md",
+        "--to", "md",
+        "--convert-trans", convert,
+        "--out", outputDir,
+        "--json",
+        "--overwrite",
+    ];
+    const command = `translate --translate-type md --convert-trans ${convert} ${inputPath}`;
+    const result = await run(resolveCommand(settings.doc2xCommand || "doc2x"), args, 45 * 60_000);
+    if (result.code !== 0) {
+        const log = writeDoc2xErrorLog(settings, command, result);
+        throw new Error(`${(result.stderr || result.stdout || `Doc2X CLI 退出码 ${result.code}`).slice(0, 12000)}\n${log ? `错误日志：${log}` : ""}`);
+    }
+    const files = collectFilesByExtension(outputDir, ".md");
+    if (!files.length) throw new Error("Doc2X 翻译完成，但没有找到 Markdown 文件");
+    return {files, markdownFiles: files, stdout: result.stdout, stderr: result.stderr};
+}
+
 export function doc2xOutputPath(attachmentId: string, fingerprint: string, settings: Settings): string {
     const path = requireNode("path");
     const safe = (fingerprint || attachmentId).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24);
     return path.join(translationOutputDir(settings), `doc2x-${safe}-${settings.doc2xOutputMode}-${(settings.doc2xTargetLang || "zh").replace(/[^a-zA-Z0-9_-]/g, "")}`);
+}
+
+export function doc2xActionOutputDir(settings: Settings, attachmentId: string, fingerprint: string, kind: string): string {
+    const path = requireNode("path");
+    const safe = (fingerprint || attachmentId).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24);
+    return path.join(translationOutputDir(settings), `doc2x-${kind}-${safe}`);
 }

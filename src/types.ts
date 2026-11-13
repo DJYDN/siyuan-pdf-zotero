@@ -33,6 +33,7 @@ export interface PdfAttachment {
     isPrimary: boolean;
     zotero?: ZoteroIdentity;
     lastOpenedAt?: number;
+    pinned?: boolean;
     /** Last reading position, restored when no explicit page/annotation is supplied. */
     lastPage?: number;
     /** 0..1 scroll position within the page, useful for long pages. */
@@ -128,7 +129,7 @@ export interface ZoteroCache {
     attachments: ZoteroCachedAttachment[];
 }
 
-export type CitationStyle = "gbt7714" | "apa" | "ieee";
+export type CitationStyle = string;
 
 export interface CitationItemRef {
     libraryId: number;
@@ -202,6 +203,7 @@ export interface Settings {
     pdf2zhServerPath: string;
     pdf2zhEngine: "pdf2zh" | "pdf2zh_next";
     pdf2zhService: string;
+    pdf2zhSourceLang: string;
     pdf2zhTargetLang: string;
     pdf2zhOutputMode: "mono" | "dual";
     pdf2zhDualMode: "LR" | "TB";
@@ -210,6 +212,7 @@ export interface Settings {
     /** Doc2X CLI, authenticated by the user's own Doc2X account. */
     doc2xCommand: string;
     doc2xAuthMode: "oauth" | "client";
+    doc2xConfigured: boolean;
     doc2xTargetLang: string;
     doc2xModel: string;
     doc2xOutputMode: "dualPdf" | "translatedPdf";
@@ -336,6 +339,7 @@ export interface PersistedState {
     recentAttachmentIds: string[];
     zotero: ZoteroCache;
     translationOutputs: Record<string, TranslationOutput>;
+    pinnedZoteroKeys: string[];
     qaConversations: Record<string, QaConversation>;
     qaThreads: Record<string, QaThread>;
     qaActiveThread: Record<string, string>;

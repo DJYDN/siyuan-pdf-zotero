@@ -1,6 +1,7 @@
 import {Dialog, showMessage} from "siyuan";
 import {CITATION_STYLES} from "../citation/csl";
 import {deleteCitation, insertCitation, updateCitation} from "../citations";
+import {citationStyleOptions, openCitationStylePicker} from "./style-picker";
 import type {CitationRecord, CitationStyle} from "../types";
 import type {Store} from "../storage";
 
@@ -13,11 +14,16 @@ function escapeHtml(text: string): string {
 export interface CitationDialogOptions {
     store: Store;
     citation?: CitationRecord;
+    initialItemKeys?: string[];
 }
 
 export function openCitationDialog(options: CitationDialogOptions): Dialog {
     const {store, citation} = options;
-    const selected = new Set<string>(citation?.items.map(item => item.itemKey) || []);
+    const selected = new Set<string>([
+        ...(citation?.items.map(item => item.itemKey) || []),
+        ...(options.initialItemKeys || []),
+    ]);
+    const initialStyle = citation?.style || store.state.settings.defaultCitationStyle;
     const dialog = new Dialog({
         title: citation ? "编辑引文" : "插入 Zotero 引文",
         width: "760px",
@@ -30,7 +36,7 @@ export function openCitationDialog(options: CitationDialogOptions): Dialog {
     <label class="fn__flex" style="flex-direction:column;gap:4px">
       <span>引用样式</span>
       <select class="b3-select fn__block" data-role="citation-style">
-        ${Object.entries(CITATION_STYLES).map(([key, meta]) => `<option value="${key}" ${((citation?.style || store.state.settings.defaultCitationStyle) === key) ? "selected" : ""}>${escapeHtml(meta.label)}</option>`).join("")}
+        ${citationStyleOptions(initialStyle)}
       </select>
     </label>
     <label class="fn__flex" style="flex-direction:column;gap:4px">
@@ -57,6 +63,19 @@ export function openCitationDialog(options: CitationDialogOptions): Dialog {
     const results = dialog.element.querySelector<HTMLElement>('[data-role="citation-results"]')!;
     const selectedBox = dialog.element.querySelector<HTMLElement>('[data-role="citation-selected"]')!;
     const styleSelect = dialog.element.querySelector<HTMLSelectElement>('[data-role="citation-style"]')!;
+    let selectedStyle = initialStyle;
+    styleSelect.addEventListener("change", () => {
+        if (styleSelect.value !== "__more__") {
+            selectedStyle = styleSelect.value;
+            return;
+        }
+        styleSelect.value = selectedStyle;
+        openCitationStylePicker(selectedStyle, id => {
+            selectedStyle = id;
+            styleSelect.innerHTML = citationStyleOptions(id);
+            styleSelect.value = id;
+        });
+    });
     const locator = dialog.element.querySelector<HTMLInputElement>('[data-role="citation-locator"]')!;
     const prefix = dialog.element.querySelector<HTMLInputElement>('[data-role="citation-prefix"]')!;
     const suffix = dialog.element.querySelector<HTMLInputElement>('[data-role="citation-suffix"]')!;

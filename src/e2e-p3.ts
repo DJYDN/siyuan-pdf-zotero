@@ -32,7 +32,7 @@ export async function runP3E2E(plugin: PdfZoteroPlugin, onProgress?: (report: P3
         void onProgress?.(JSON.parse(JSON.stringify(report)));
     };
     try {
-        const samplePath = "F:\\study\\VStudio\\SiYuanArticleManger\\test-fixtures\\sample-paper.pdf";
+        const samplePath = "test-fixtures/sample-paper.pdf";
         const attachment = await plugin.importLocalPath(samplePath);
         if (!attachment) {
             throw new Error("could not import sample PDF");
@@ -60,7 +60,7 @@ export async function runP3E2E(plugin: PdfZoteroPlugin, onProgress?: (report: P3
             siyuanDocId: "20260101000000-p3doc",
             createdAt: Date.now(),
         };
-        attachment.path = "F:\\study\\VStudio\\SiYuanArticleManger\\test-fixtures\\__missing-p3__.pdf";
+        attachment.path = "test-fixtures/__missing-p3__.pdf";
         await plugin.store.save();
         step("attachment-broken", {
             attachmentId: attachment.id,

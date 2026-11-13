@@ -1,34 +1,44 @@
 import CSL from "citeproc";
 import {pluginAssetUrl} from "../runtime";
 import type {CitationOptions, CitationStyle} from "../types";
+import {CSL_STYLE_ALIASES, CSL_STYLE_CATALOG, type CslStyleMeta} from "./style-catalog";
 
 export interface StyleMeta {
     file: string;
     lang: string;
     label: string;
     numeric: boolean;
+    title?: string;
 }
 
-export const CITATION_STYLES: Record<CitationStyle, StyleMeta> = {
-    gbt7714: {
-        file: "gb-t-7714-2015-numeric.csl",
-        lang: "zh-CN",
-        label: "GB/T 7714-2015（顺序编码）",
-        numeric: true,
-    },
-    apa: {
-        file: "apa.csl",
-        lang: "en-US",
-        label: "APA 7th",
-        numeric: false,
-    },
-    ieee: {
-        file: "ieee.csl",
-        lang: "en-US",
-        label: "IEEE",
-        numeric: true,
-    },
-};
+const catalogById = new Map(CSL_STYLE_CATALOG.map(item => [item.id, item]));
+
+function styleMeta(item: CslStyleMeta): StyleMeta {
+    return {
+        file: item.file,
+        lang: item.id.startsWith("gb-t-7714") ? "zh-CN" : "en-US",
+        label: item.label,
+        title: item.title,
+        numeric: item.numeric,
+    };
+}
+
+export const CITATION_STYLES: Record<string, StyleMeta> = Object.fromEntries(
+    CSL_STYLE_CATALOG.map(item => [item.id, styleMeta(item)]),
+);
+
+// Keep old citation records and old settings working.
+for (const [alias, target] of Object.entries(CSL_STYLE_ALIASES)) {
+    const item = catalogById.get(target);
+    if (item) CITATION_STYLES[alias] = styleMeta(item);
+}
+
+const gbt = catalogById.get("gb-t-7714-2015-numeric");
+if (gbt) CITATION_STYLES.gbt7714 = {...styleMeta(gbt), label: "GB/T 7714-2015（顺序编码）"};
+const apa = catalogById.get("apa");
+if (apa) CITATION_STYLES.apa = {...styleMeta(apa), label: "APA 7th"};
+const ieee = catalogById.get("ieee");
+if (ieee) CITATION_STYLES.ieee = {...styleMeta(ieee), label: "IEEE"};
 
 const textCache = new Map<string, string>();
 

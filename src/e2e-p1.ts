@@ -172,7 +172,7 @@ export async function runP1E2E(
         const editor = await waitFor(() => getAllEditor().find(item => item.protyle.block.rootID === docId), 15000);
         step("editor-opened", {rootID: editor.protyle.block.rootID});
 
-        const sourcePdf = "F:\\study\\VStudio\\SiYuanArticleManger\\test-fixtures\\navigation.pdf";
+        const sourcePdf = "test-fixtures/navigation.pdf";
         const uniquePdf = sourcePdf.replace(/\.pdf$/i, `-p1-${Date.now()}.pdf`);
         const fsNode = requireNode("fs");
         fsNode.copyFileSync(sourcePdf, uniquePdf);

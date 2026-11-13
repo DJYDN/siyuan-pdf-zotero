@@ -170,7 +170,7 @@ export async function runP0E2E(
         step("editor-opened", {rootID: editor.protyle.block.rootID});
 
         const pdfPath = localStorage.getItem("pdf-zotero-e2e-pdf")
-            || "F:\\study\\VStudio\\SiYuanArticleManger\\test-fixtures\\sample-paper.pdf";
+            || "test-fixtures/sample-paper.pdf";
         // Unique path/attachment per run: old reader tabs from prior runs must not shadow the new one.
         const uniquePath = pdfPath.replace(/\.pdf$/i, `-e2e-${Date.now()}.pdf`);
         const fs = requireNode("fs");

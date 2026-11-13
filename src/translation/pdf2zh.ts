@@ -160,6 +160,20 @@ export class Pdf2zhClient {
         this.baseUrl = normalizeBaseUrl(baseUrl);
     }
 
+    async progress(): Promise<{running: boolean; progress: number; status: string; logs: string[]} | null> {
+        try {
+            const data = await requestJson(`${this.baseUrl}/progress`, {timeout: 5000});
+            return {
+                running: Boolean(data?.running),
+                progress: Number(data?.progress) || 0,
+                status: String(data?.status || ""),
+                logs: Array.isArray(data?.logs) ? data.logs.map((line: any) => String(line)) : [],
+            };
+        } catch {
+            return null;
+        }
+    }
+
     async health(): Promise<{ok: boolean; version?: string; error?: string}> {
         try {
             const data = await requestJson(`${this.baseUrl}/health`);
@@ -179,7 +193,7 @@ export class Pdf2zhClient {
         const payload: Record<string, any> = {
             engine,
             service: normalizeService(settings.pdf2zhService || (engine === "pdf2zh_next" ? "siliconflowfree" : "bing")),
-            sourceLang: "auto",
+            sourceLang: settings.pdf2zhSourceLang || "en",
             targetLang: settings.pdf2zhTargetLang || "zh-CN",
             fileName,
             fileContent: base64,

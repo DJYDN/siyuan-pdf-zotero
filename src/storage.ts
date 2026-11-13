@@ -57,6 +57,7 @@ export function defaultState(): PersistedState {
         screenshotRegions: {},
         recentAttachmentIds: [],
         translationOutputs: {},
+        pinnedZoteroKeys: [],
         qaConversations: {},
         qaThreads: {},
         qaActiveThread: {},
@@ -100,12 +101,14 @@ export function defaultState(): PersistedState {
             pdf2zhServerPath: "",
             pdf2zhEngine: "pdf2zh",
             pdf2zhService: "bing",
+        pdf2zhSourceLang: "en",
             pdf2zhTargetLang: "zh-CN",
             pdf2zhOutputMode: "dual",
             pdf2zhDualMode: "LR",
             wholeTranslationProvider: "doc2x",
             doc2xCommand: "doc2x",
             doc2xAuthMode: "oauth",
+            doc2xConfigured: true,
             doc2xTargetLang: "zh",
             doc2xModel: "",
             doc2xOutputMode: "dualPdf",
@@ -243,6 +246,7 @@ export class Store {
             screenshotRegions: raw.screenshotRegions || {},
             recentAttachmentIds: Array.isArray(raw.recentAttachmentIds) ? raw.recentAttachmentIds : [],
             translationOutputs: raw.translationOutputs && typeof raw.translationOutputs === "object" ? raw.translationOutputs : {},
+            pinnedZoteroKeys: Array.isArray(raw.pinnedZoteroKeys) ? raw.pinnedZoteroKeys : [],
             qaConversations: raw.qaConversations && typeof raw.qaConversations === "object" ? raw.qaConversations : {},
             qaThreads: migrateQaThreads(raw),
             qaActiveThread: raw.qaActiveThread && typeof raw.qaActiveThread === "object" ? raw.qaActiveThread : {},
@@ -395,7 +399,28 @@ export class Store {
     recentAttachments(): PdfAttachment[] {
         return this.state.recentAttachmentIds
             .map(id => this.state.attachments[id])
-            .filter((a): a is PdfAttachment => Boolean(a));
+            .filter((a): a is PdfAttachment => Boolean(a))
+            .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))
+                || (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0));
+    }
+
+    toggleAttachmentPin(attachmentId: string): void {
+        const attachment = this.state.attachments[attachmentId];
+        if (attachment) {
+            attachment.pinned = !attachment.pinned;
+        }
+    }
+
+    isZoteroItemPinned(itemKey: string): boolean {
+        return this.state.pinnedZoteroKeys.includes(itemKey);
+    }
+
+    toggleZoteroItemPin(itemKey: string): void {
+        if (this.state.pinnedZoteroKeys.includes(itemKey)) {
+            this.state.pinnedZoteroKeys = this.state.pinnedZoteroKeys.filter(key => key !== itemKey);
+        } else {
+            this.state.pinnedZoteroKeys = [...this.state.pinnedZoteroKeys, itemKey];
+        }
     }
 
     addTranslationOutput(output: Omit<TranslationOutput, "id"> & {id?: string}): TranslationOutput {
