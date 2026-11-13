@@ -8,7 +8,7 @@
 
 > 本项目只使用思源公开插件 API。不会修改 `.sy` 文件、不会写入 Zotero 数据库，也不会修改原始 PDF。
 
-当前版本：**0.9.16**（更新记录见 [CHANGELOG.md](CHANGELOG.md)）
+当前版本：**0.9.17**（更新记录见 [CHANGELOG.md](CHANGELOG.md)）
 
 ---
 

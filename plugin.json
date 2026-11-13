@@ -2,7 +2,7 @@
   "name": "siyuan-pdf-zotero",
   "author": "SiYuanArticleManger",
   "url": "https://github.com/siyuan-note/plugin-sample",
-  "version": "0.9.16",
+  "version": "0.9.17",
   "minAppVersion": "3.8.7",
   "backends": [
     "windows"

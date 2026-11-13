@@ -55,6 +55,8 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
     private debugLogs: Array<{at: string; level: string; event: string; data: Record<string, unknown>}> = [];
     private calloutObserver: MutationObserver | null = null;
     private calloutStyleTimer = 0;
+    private citationRefreshTimer = 0;
+    private citationRefreshGuardUntil = 0;
     private readonly onPastePdfCallout = (event: ClipboardEvent): void => {
         const markdown = event.clipboardData?.getData("text/plain") || "";
         if (!/^> \[!PDF\|/m.test(markdown)) return;
@@ -210,6 +212,8 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
             this.registerDock();
             this.registerCommands();
             this.eventBus.on("open-siyuan-url-plugin", this.handlePluginUrl);
+            this.eventBus.on("ws-main", this.onWsMain);
+            this.eventBus.on("loaded-protyle-static", this.onProtyleLoaded);
             this.exposeDiagnostics();
             report.stage = "onload-ok";
             report.dockRegistered = Boolean(this.registeredDock);
@@ -559,6 +563,9 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
         this.unloading = true;
         window.removeEventListener("beforeunload", this.onBeforeUnload);
         this.eventBus.off("open-siyuan-url-plugin", this.handlePluginUrl);
+        this.eventBus.off("ws-main", this.onWsMain);
+        this.eventBus.off("loaded-protyle-static", this.onProtyleLoaded);
+        window.clearTimeout(this.citationRefreshTimer);
         document.removeEventListener("mouseover", this.onNoteLinkHover);
         document.removeEventListener("mouseout", this.onNoteLinkOut);
         document.removeEventListener("focusin", this.onFocusIn, true);
@@ -755,7 +762,7 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
             langKey: "refreshZoteroCitations",
             langText: "刷新当前文档参考文献",
             execute: () => {
-                const editor = getAllEditor()[0];
+                const editor = getActiveEditor() || getAllEditor()[0];
                 const docId = String(editor?.protyle.block.rootID || "");
                 if (!docId) {
                     showMessage("请先打开一个思源文档");
@@ -779,6 +786,47 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
             },
         });
     }
+
+    private readonly onProtyleLoaded = (event: any): void => {
+        const docId = String(event?.protyle?.block?.rootID || "");
+        if (!docId) return;
+        const hasCitations = Object.values(this.store.state.citations).some(record => record.siyuanDocId === docId)
+            || Boolean(this.store.state.references[docId]);
+        if (!hasCitations) return;
+        window.setTimeout(() => {
+            if (Date.now() < this.citationRefreshGuardUntil) return;
+            this.citationRefreshGuardUntil = Date.now() + 2500;
+            void refreshDocumentCitations(this.store, docId).catch(error => {
+                this.logDebug("citation.open-refresh.failed", {docId, error: String(error?.message || error)});
+            });
+        }, 450);
+    };
+
+    private readonly onWsMain = (event: any): void => {
+        if (event?.cmd !== "transactions") return;
+        const rawData = event.data;
+        const transactions = Array.isArray(rawData)
+            ? rawData
+            : (Array.isArray(rawData?.transactions) ? rawData.transactions : [rawData].filter(Boolean));
+        const hasOperations = transactions.some((transaction: any) =>
+            (Array.isArray(transaction?.doOperations) && transaction.doOperations.length > 0)
+            || (Array.isArray(transaction?.operations) && transaction.operations.length > 0));
+        if (!hasOperations) return;
+        const editor = getActiveEditor() || getAllEditor()[0];
+        const docId = String(editor?.protyle?.block?.rootID || "");
+        if (!docId) return;
+        const hasCitations = Object.values(this.store.state.citations).some(record => record.siyuanDocId === docId)
+            || Boolean(this.store.state.references[docId]);
+        if (!hasCitations) return;
+        if (Date.now() < this.citationRefreshGuardUntil) return;
+        window.clearTimeout(this.citationRefreshTimer);
+        this.citationRefreshTimer = window.setTimeout(() => {
+            this.citationRefreshGuardUntil = Date.now() + 2500;
+            void refreshDocumentCitations(this.store, docId).catch(error => {
+                this.logDebug("citation.auto-refresh.failed", {docId, error: String(error?.message || error)});
+            });
+        }, 700);
+    };
 
     openCitationDialog(citationId?: string, initialItemKeys: string[] = []): void {
         const requestedId = citationId || "";

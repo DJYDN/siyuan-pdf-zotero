@@ -153,6 +153,36 @@ export async function formatBibliography(
     return bibliographyToText(bibliography[1]);
 }
 
+/**
+ * Format citations and the bibliography on the SAME citeproc engine.
+ * For numeric styles citeproc assigns numbers when items are registered and
+ * citations are processed. Two separate engines can therefore produce a
+ * bibliography whose numbers no longer match the in-text numbers.
+ */
+export async function formatCitationsAndBibliography(
+    clusters: CitationCluster[],
+    items: Record<string, any>[],
+    style: CitationStyle,
+): Promise<{citations: string[]; bibliography: string[]}> {
+    const {engine} = await createEngine(items, style);
+    const citations: string[] = [];
+    for (const cluster of clusters) {
+        const citationItems = cluster.cslIds.map(id => ({
+            id,
+            ...(cluster.options.locator ? {locator: cluster.options.locator} : {}),
+            ...(cluster.options.prefix ? {prefix: cluster.options.prefix} : {}),
+            ...(cluster.options.suffix ? {suffix: cluster.options.suffix} : {}),
+            ...(cluster.options.suppressAuthor ? {"suppress-author": true} : {}),
+        }));
+        citations.push(String(engine.makeCitationCluster(citationItems)));
+    }
+    const bibliography = engine.makeBibliography();
+    return {
+        citations,
+        bibliography: bibliography && Array.isArray(bibliography[1]) ? bibliographyToText(bibliography[1]) : [],
+    };
+}
+
 export function citationStyleLabel(style: CitationStyle): string {
     return CITATION_STYLES[style]?.label || style;
 }

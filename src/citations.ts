@@ -1,6 +1,6 @@
 import {getActiveEditor, getAllEditor, showMessage} from "siyuan";
 import {appendMarkdown, getBlockDom, querySql, updateBlockDom, updateBlockMarkdown} from "./api";
-import {formatBibliography, formatCitationClusters} from "./citation/csl";
+import {formatCitationsAndBibliography} from "./citation/csl";
 import {newId} from "./storage";
 import {PLUGIN_NAME} from "./constants";
 import type {CitationOptions, CitationRecord, CitationStyle, ReferencesBlock} from "./types";
@@ -156,7 +156,7 @@ async function updateCitationSpans(blocks: DocCitationBlock[], visibleById: Map<
         for (const span of Array.from(parsed.querySelectorAll<HTMLElement>('[data-href*="/citation?id="]'))) {
             const id = parseCitationIdFromHref(span.dataset.href || span.getAttribute("href") || "");
             const visible = visibleById.get(id);
-            if (visible && span.innerHTML !== visible) {
+            if (visible !== undefined && span.innerHTML !== visible) {
                 span.innerHTML = visible;
                 changed = true;
             }
@@ -167,6 +167,15 @@ async function updateCitationSpans(blocks: DocCitationBlock[], visibleById: Map<
     }
 }
 
+async function blockUsable(id: string): Promise<boolean> {
+    if (!id) return false;
+    try {
+        return Boolean((await getBlockDom(id)).trim());
+    } catch {
+        return false;
+    }
+}
+
 async function updateReferences(store: Store, docId: string, style: CitationStyle, entries: string[]): Promise<string[]> {
     // One paragraph block with hard line breaks. Unlike a markdown list this has no
     // child blocks, so refresh replaces it in place without accumulating duplicates.
@@ -174,15 +183,17 @@ async function updateReferences(store: Store, docId: string, style: CitationStyl
     const existing = store.state.references[docId];
     if (existing) {
         let headingBlockId = existing.headingBlockId;
-        if (!headingBlockId) {
+        if (!await blockUsable(headingBlockId)) {
             const heading = await appendMarkdown(docId, "#### 参考文献");
             headingBlockId = heading.ids[0] || "";
-        } else {
-            try {
-                await updateBlockMarkdown(headingBlockId, "#### 参考文献");
-            } catch {
-                // ignore
-            }
+        }
+        if (!await blockUsable(existing.listBlockId)) {
+            const list = await appendMarkdown(docId, markdown);
+            existing.listBlockId = list.ids[0] || "";
+            existing.headingBlockId = headingBlockId;
+            existing.style = style;
+            existing.updatedAt = Date.now();
+            return entries;
         }
         try {
             await updateBlockMarkdown(existing.listBlockId, markdown);
@@ -213,26 +224,41 @@ async function updateReferences(store: Store, docId: string, style: CitationStyl
 }
 
 export async function refreshDocumentCitations(store: Store, docId: string): Promise<CitationRefreshResult> {
-    let blocks = await getDocCitationBlocks(docId);
-    let orderedIds = blocks.flatMap(block => block.citationIds);
-    let records = orderedIds
-        .map(id => store.state.citations[id])
-        .filter((record): record is CitationRecord => Boolean(record));
-    // The block index can lag a few hundred ms behind Protyle.insert(). Fall back to
-    // the structured records and their captured block ids rather than leaving `[?]`.
+    const blocks = await getDocCitationBlocks(docId);
+    const orderedIds = blocks.flatMap(block => block.citationIds);
+    const records: CitationRecord[] = [];
+    const seen = new Set<string>();
+    for (const id of orderedIds) {
+        const record = store.state.citations[id];
+        if (!record || seen.has(record.id)) continue;
+        seen.add(record.id);
+        records.push(record);
+    }
+    // The block index can lag a few hundred ms behind Protyle.insert(). Only fall
+    // back to a structured record when its block still contains that citation;
+    // stale records from manually deleted citations must not enter the numbering.
     const docRecords = Object.values(store.state.citations)
         .filter(record => record.siyuanDocId === docId)
         .sort((a, b) => a.createdAt - b.createdAt);
     for (const record of docRecords) {
-        if (!records.some(item => item.id === record.id)) {
-            records.push(record);
-            orderedIds.push(record.id);
-            if (record.siyuanBlockId && !blocks.some(block => block.blockId === record.siyuanBlockId)) {
-                blocks.push({blockId: record.siyuanBlockId, markdown: "", citationIds: [record.id]});
-            }
+        if (seen.has(record.id) || !record.siyuanBlockId) continue;
+        try {
+            const dom = await getBlockDom(record.siyuanBlockId);
+            if (!dom.includes(record.id)) continue;
+        } catch {
+            continue;
+        }
+        seen.add(record.id);
+        records.push(record);
+        if (!blocks.some(block => block.blockId === record.siyuanBlockId)) {
+            blocks.push({blockId: record.siyuanBlockId, markdown: "", citationIds: [record.id]});
         }
     }
     if (!records.length) {
+        if (store.state.references[docId]) {
+            await updateReferences(store, docId, store.state.settings.defaultCitationStyle, []);
+            await store.save();
+        }
         return {ok: true, citationCount: 0, references: [], style: store.state.settings.defaultCitationStyle};
     }
     const style = styleForRecords(records);
@@ -242,22 +268,21 @@ export async function refreshDocumentCitations(store: Store, docId: string): Pro
         cslIds: record.items.map(item => String(item.csl.id)),
         options: record.options,
     }));
-    const visible = await formatCitationClusters(clusters, items, style);
+    const formatted = await formatCitationsAndBibliography(clusters, items, style);
     const visibleById = new Map<string, string>();
     records.forEach((record, index) => {
-        record.visibleHtml = visible[index];
+        record.visibleHtml = formatted.citations[index];
         record.style = style;
         record.updatedAt = Date.now();
-        visibleById.set(record.id, visible[index]);
+        visibleById.set(record.id, formatted.citations[index]);
     });
     await updateCitationSpans(blocks, visibleById);
-    const bibliography = await formatBibliography(items, style);
-    await updateReferences(store, docId, style, bibliography);
+    await updateReferences(store, docId, style, formatted.bibliography);
     await store.save();
     return {
         ok: true,
         citationCount: records.length,
-        references: bibliography,
+        references: formatted.bibliography,
         style,
         debug: {
             blockRows: blocks.map(block => ({id: block.blockId, ids: block.citationIds})),
