@@ -95,7 +95,7 @@ export function defaultState(): PersistedState {
             translationMinChars: 2,
             translationTargetLang: "zh-CN",
             translationShowOriginal: true,
-            translationActiveServiceId: "translation-siyuan-ai",
+            translationActiveServiceId: "translation-bing",
             translationServices: defaultTranslationServices(),
             pdf2zhBaseUrl: "http://127.0.0.1:8890",
             pdf2zhServerPath: "",
@@ -229,6 +229,16 @@ export class Store {
         const settings = {...base.settings, ...(raw.settings || {})};
         if (!Array.isArray(settings.translationServices) || !settings.translationServices.length) {
             settings.translationServices = defaultTranslationServices();
+        }
+        for (const service of settings.translationServices) {
+            if (service.type === "bing" && /cn\.bing\.com/i.test(service.baseURL || "")) {
+                service.baseURL = "https://www.bing.com/translator";
+            }
+        }
+        for (const fallbackService of defaultTranslationServices()) {
+            if (!settings.translationServices.some(item => item.type === fallbackService.type)) {
+                settings.translationServices.push({...fallbackService});
+            }
         }
         // v3 replaces the generic "PDF page screenshot" title with a compact,
         // source-identifying caption so equal page numbers remain distinguishable.

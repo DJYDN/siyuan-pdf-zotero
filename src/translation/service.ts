@@ -31,6 +31,12 @@ function codeFor(service: TranslationServiceType, target: string): string {
     if (service === "google") {
         return target;
     }
+    if (service === "bing") {
+        return target === "zh-CN" ? "zh-Hans" : target === "zh-TW" ? "zh-Hant" : target;
+    }
+    if (service === "mymemory") {
+        return target;
+    }
     if (service === "baidu" || service === "tencent" || service === "aliyun") {
         return target === "zh-TW" ? "cht" : target.startsWith("zh") ? "zh" : target;
     }
@@ -67,6 +73,7 @@ function rfc3986(value: string): string {
 function httpRequest(
     urlValue: string,
     options: {method?: string; headers?: Record<string, string>; body?: string; timeout?: number} = {},
+    redirects = 0,
 ): Promise<{status: number; text: string}> {
     const url = new URL(urlValue);
     const transport = requireNode(url.protocol === "https:" ? "https" : "http");
@@ -74,20 +81,40 @@ function httpRequest(
         return Promise.reject(new Error("当前运行环境没有 Node HTTP 能力"));
     }
     return new Promise((resolve, reject) => {
+        const headers: Record<string, string> = {...(options.headers || {})};
+        if (options.body && !Object.keys(headers).some(key => key.toLowerCase() === "content-length")) {
+            headers["Content-Length"] = String(Buffer.byteLength(options.body));
+        }
         const request = transport.request({
             protocol: url.protocol,
             hostname: url.hostname,
             port: url.port || (url.protocol === "https:" ? 443 : 80),
             path: `${url.pathname}${url.search}`,
             method: options.method || "GET",
-            headers: {...(options.headers || {})},
+            headers,
         }, (response: any) => {
             const chunks: Buffer[] = [];
             response.on("data", (chunk: Buffer) => chunks.push(chunk));
-            response.on("end", () => resolve({
-                status: response.statusCode || 0,
-                text: Buffer.concat(chunks).toString("utf8"),
-            }));
+            response.on("end", () => {
+                const status = response.statusCode || 0;
+                const location = response.headers.location;
+                if ([301, 302, 303, 307, 308].includes(status) && location && redirects < 5) {
+                    const nextUrl = new URL(location, url).href;
+                    const nextOptions: typeof options = {...options, headers: {...(options.headers || {})}};
+                    if (status === 301 || status === 302 || status === 303) {
+                        nextOptions.method = "GET";
+                        delete nextOptions.body;
+                        delete nextOptions.headers["Content-Type"];
+                        delete nextOptions.headers["Content-Length"];
+                    }
+                    resolve(httpRequest(nextUrl, nextOptions, redirects + 1));
+                    return;
+                }
+                resolve({
+                    status,
+                    text: Buffer.concat(chunks).toString("utf8"),
+                });
+            });
         });
         request.setTimeout(options.timeout || 30_000, () => request.destroy(new Error("翻译请求超时")));
         request.on("error", reject);
@@ -228,6 +255,58 @@ async function translateGoogle(config: TranslationServiceConfig, text: string, t
     return result.trim();
 }
 
+async function translateBing(config: TranslationServiceConfig, text: string, target: string): Promise<string> {
+    const pageUrl = (config.baseURL || "https://www.bing.com/translator")
+        .trim()
+        .replace("cn.bing.com", "www.bing.com")
+        .replace(/\/+$/, "");
+    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0";
+    const page = await httpRequest(pageUrl, {headers: {"User-Agent": ua, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"}, timeout: 25_000});
+    if (page.status < 200 || page.status >= 300) {
+        throw new Error(`Bing Translator HTTP ${page.status}`);
+    }
+    const ig = (page.text.match(/"ig":"(.*?)"/) || [])[1] || "";
+    const iidMatches = page.text.match(/data-iid="(.*?)"/g) || [];
+    const iid = iidMatches.length ? (iidMatches[iidMatches.length - 1].match(/data-iid="(.*?)"/) || [])[1] || "" : "";
+    const params = page.text.match(/params_AbusePreventionHelper\s*=\s*\[(.*?),"(.*?)",/);
+    if (!ig || !iid || !params) throw new Error("Bing Translator 页面令牌解析失败");
+    const base = pageUrl.replace(/\/translator.*$/, "");
+    const form = new URLSearchParams({
+        fromLang: "auto-detect",
+        to: codeFor("bing", target),
+        text,
+        token: params[2],
+        key: params[1],
+    });
+    const response = await httpRequest(`${base}/ttranslatev3?IG=${encodeURIComponent(ig)}&IID=${encodeURIComponent(iid)}`, {
+        method: "POST",
+        headers: {"User-Agent": ua, "Content-Type": "application/x-www-form-urlencoded"},
+        body: form.toString(),
+        timeout: 30_000,
+    });
+    if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Bing Translator HTTP ${response.status}: ${response.text.slice(0, 200)}`);
+    }
+    const data = JSON.parse(response.text);
+    if (data?.statusCode) throw new Error(`Bing Translator: ${data.errorMessage || data.statusCode}`);
+    const result = data?.[0]?.translations?.[0]?.text;
+    if (!result) throw new Error("Bing Translator 没有返回译文");
+    return String(result).trim();
+}
+
+async function translateMyMemory(config: TranslationServiceConfig, text: string, target: string): Promise<string> {
+    const source = /[\u3400-\u9fff]/.test(text) ? "zh-CN" : "en";
+    const url = new URL(config.baseURL.replace(/\/+$/, "") + "/get");
+    url.searchParams.set("q", text);
+    url.searchParams.set("langpair", `${source}|${codeFor("mymemory", target)}`);
+    const data = await getJson(url.href, {"User-Agent": "siyuan-pdf-zotero"});
+    const result = data?.responseData?.translatedText;
+    if (!result || /MYMEMORY WARNING/i.test(String(result))) {
+        throw new Error(String(result || data?.responseDetails || "MyMemory 没有返回译文"));
+    }
+    return String(result).trim();
+}
+
 async function translateBaidu(config: TranslationServiceConfig, text: string, target: string): Promise<string> {
     const [appid, secret] = splitSecret(config.apiKey);
     if (!appid || !secret) throw new Error("百度翻译凭证格式应为 appid#secret");
@@ -366,6 +445,8 @@ export async function translateText(
         case "openai": result = await translateOpenAICompatible(service, value, targetLang); break;
         case "deepl": result = await translateDeepL(service, value, targetLang); break;
         case "google": result = await translateGoogle(service, value, targetLang); break;
+        case "bing": result = await translateBing(service, value, targetLang); break;
+        case "mymemory": result = await translateMyMemory(service, value, targetLang); break;
         case "baidu": result = await translateBaidu(service, value, targetLang); break;
         case "youdao": result = await translateYoudao(service, value, targetLang); break;
         case "tencent": result = await translateTencent(service, value, targetLang); break;

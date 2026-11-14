@@ -8,7 +8,7 @@
 
 > 本项目只使用思源公开插件 API。不会修改 `.sy` 文件、不会写入 Zotero 数据库，也不会修改原始 PDF。
 
-当前版本：**0.9.17**（更新记录见 [CHANGELOG.md](CHANGELOG.md)）
+当前版本：**0.9.21**（更新记录见 [CHANGELOG.md](CHANGELOG.md)）
 
 ---
 
@@ -40,6 +40,7 @@
 - 文献标题/作者/DOI 搜索；
 - 按 Collection 过滤；
 - 插入结构化引文链接；
+- 划词翻译支持 **Bing Translator / MyMemory** 免费服务；
 - 内置 **121 种 CSL 引用样式**，默认展示 5 种通用样式，可搜索选择更多；
 - citeproc-js 生成参考文献；
 - 引文编号按文档顺序刷新；

@@ -258,6 +258,8 @@ export type TranslationServiceType =
     | "openai"
     | "deepl"
     | "google"
+    | "bing"
+    | "mymemory"
     | "baidu"
     | "youdao"
     | "tencent"

@@ -1135,6 +1135,8 @@ function serviceHint(type: string): string {
         openai: "OpenAI/DeepSeek/硅基流动等兼容接口；Base URL 写到 /v1。",
         deepl: "填入 DeepL Auth Key；免费版 Base URL 为 https://api-free.deepl.com/v2。",
         google: "免费网页接口无需 Key；也可填入 Google API Key。",
+        bing: "免费网页接口，无需 Key；Base URL 默认 https://www.bing.com/translator。",
+        mymemory: "免费接口，无需 Key；有每日字符额度，适合轻量划词。",
         baidu: "凭证格式：appid#secret。",
         youdao: "凭证格式：appKey#appSecret。",
         tencent: "凭证格式：secretId#secretKey#region。",

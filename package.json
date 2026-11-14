@@ -1,6 +1,6 @@
 {
   "name": "siyuan-pdf-zotero",
-  "version": "0.9.17",
+  "version": "0.9.21",
   "private": true,
   "description": "Lightweight SiYuan PDF reader with PDF++ annotations, Zotero citations and CSL bibliographies",
   "license": "MIT",

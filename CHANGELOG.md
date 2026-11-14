@@ -1,5 +1,32 @@
 # 更新记录
 
+## 0.9.21
+
+- 修复 Bing 划词翻译在跟随重定向后仍返回 301/411 的问题：
+  - 翻译 HTTP 客户端自动跟随 301/302/303/307/308；
+  - POST 请求自动设置 Content-Length；
+  - `cn.bing.com` 自动规范到 `www.bing.com`；
+  - 默认 Bing Base URL 改为 `https://www.bing.com/translator`。
+
+## 0.9.20
+
+- 插件管理列表中新增设置齿轮按钮。
+- 通过提供 SiYuan `Setting` 实例并重写 `openSetting()`，点击齿轮打开原有完整设置对话框。
+
+## 0.9.19
+
+- 修复 Bing Translator 免费服务：
+  - 处理 `cn.bing.com/translator` 的 301 重定向；
+  - 补充 POST `Content-Length`，修复 411；
+  - 默认地址改为 `https://www.bing.com/translator`。
+
+## 0.9.18
+
+- 新增免费划词翻译服务：
+  - **Bing Translator**：无需 Key，自动检测源语言；
+  - **MyMemory**：无需 Key，适合中英互译，有每日字符额度。
+- 设置页测试结果：Bing 与 MyMemory 可正常返回中文译文；Google 免费接口当前返回 429。
+
 ## 0.9.17
 
 - 修复参考文献索引与正文引用编号不一致：

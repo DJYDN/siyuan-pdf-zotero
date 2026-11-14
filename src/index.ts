@@ -1,4 +1,4 @@
-import {Dialog, getActiveEditor, getFrontend, getAllEditor, getAllTabs, openTab, Plugin, showMessage} from "siyuan";
+import {Dialog, getActiveEditor, getFrontend, getAllEditor, getAllTabs, openTab, Plugin, Setting, showMessage} from "siyuan";
 import {parsePluginUrl} from "./anchor";
 import {DOCK_TYPE, HIGHLIGHT_COLORS, PLUGIN_DISPLAY_NAME, PLUGIN_NAME, TAB_TYPE, VERSION} from "./constants";
 import {applyPdfCalloutAttributes, stylePdfCalloutDom} from "./notes";
@@ -7,7 +7,7 @@ import {openCitationDialog} from "./ui/citation-dialog";
 import {insertCitation, refreshDocumentCitations} from "./citations";
 import type {NoteInsertionTarget, PluginHost} from "./host";
 import {detectZoteroDataDir, fileExists, hasNodeFs, pluginAssetUrl, readFileBytes, requireNode} from "./runtime";
-import {renderDock} from "./ui/dock";
+import {openSettings, renderDock} from "./ui/dock";
 import {PdfReader} from "./ui/reader";
 import {CSS} from "./ui/styles";
 import {PdfZoteroService} from "./service";
@@ -207,6 +207,9 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
                 await this.store.save();
             }
             this.service = new PdfZoteroService(this);
+            // Register a Setting instance so SiYuan shows the settings button in
+            // the plugin management list. The actual UI is the plugin dialog.
+            this.setting = new Setting({});
             this.injectStyles();
             this.registerTab();
             this.registerDock();
@@ -827,6 +830,10 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
             });
         }, 700);
     };
+
+    openSetting(): void {
+        openSettings(this);
+    }
 
     openCitationDialog(citationId?: string, initialItemKeys: string[] = []): void {
         const requestedId = citationId || "";
