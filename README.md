@@ -26,11 +26,19 @@
 
 每个包目录内都有独立 `README.md` 和 `SHA-256` 文件。
 
-## GitHub Releases
+## GitHub Release
 
-- 插件：[v0.9.56](https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/v0.9.56)
-- PDF2zh 翻译包：[pdf2zh-portable-v0.9.56](https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/pdf2zh-portable-v0.9.56)
-- OCR 包：[ocr-service-v0.9.56](https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/ocr-service-v0.9.56)
+统一发布页（一次 Release，三个附件）：
+
+https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/v0.9.56
+
+发布页内包含：
+
+```text
+siyuan-pdf-zotero-0.9.56.zip
+SiYuan-PDF2zh-Portable.zip
+OCR-Service-Portable.zip
+```
 
 ---
 
