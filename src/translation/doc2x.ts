@@ -1,6 +1,7 @@
 import {requireNode} from "../runtime";
 import type {Settings} from "../types";
 import {translationOutputDir} from "./pdf2zh";
+import {effectiveTargetLang} from "./target-lang";
 
 export interface Doc2xCheck {
     ok: boolean;
@@ -190,7 +191,7 @@ export async function translateWithDoc2x(
         "translate",
         inputPath,
         "--auth-mode", settings.doc2xAuthMode || "oauth",
-        "--target-language", settings.doc2xTargetLang || "zh",
+        "--target-language", effectiveTargetLang(settings, "doc2x"),
         "--out", outputDir,
         "--receipt", receipt,
         "--json",
@@ -373,7 +374,7 @@ export async function translateWithDoc2xMarkdown(
 export function doc2xOutputPath(attachmentId: string, fingerprint: string, settings: Settings): string {
     const path = requireNode("path");
     const safe = (fingerprint || attachmentId).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24);
-    return path.join(translationOutputDir(settings), `doc2x-${safe}-${settings.doc2xOutputMode}-${(settings.doc2xTargetLang || "zh").replace(/[^a-zA-Z0-9_-]/g, "")}`);
+    return path.join(translationOutputDir(settings), `doc2x-${safe}-${settings.doc2xOutputMode}-${effectiveTargetLang(settings, "doc2x").replace(/[^a-zA-Z0-9_-]/g, "")}`);
 }
 
 export function doc2xActionOutputDir(settings: Settings, attachmentId: string, fingerprint: string, kind: string): string {

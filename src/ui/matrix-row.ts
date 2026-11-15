@@ -2,18 +2,29 @@ import {Dialog, showMessage} from "siyuan";
 import type {PluginHost} from "../host";
 import type {MatrixColumn, MatrixProject, MatrixRow} from "../types";
 import {createNoteFromTemplate} from "../template/notes";
+import {formulaValue} from "../matrix/model";
 
 function escapeHtml(text: string): string {
     return text.replace(/[&<>"']/g, ch => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[ch] as string));
 }
 
-function field(column: MatrixColumn, row: MatrixRow): string {
+function field(project: MatrixProject, column: MatrixColumn, row: MatrixRow): string {
+    if (column.type === "formula") return `<input class="b3-text-field fn__block" value="${escapeHtml(formulaValue(project, row, column))}" readonly />`;
     const value = row.values[column.id];
     if (column.type === "longtext") {
         return `<textarea class="b3-text-field fn__block" rows="4" data-column="${column.id}">${escapeHtml(String(value ?? ""))}</textarea>`;
     }
     if (column.type === "select") {
         return `<select class="b3-select fn__block" data-column="${column.id}">${["", ...(column.options || [])].map(option => `<option value="${escapeHtml(option)}" ${String(value ?? "") === option ? "selected" : ""}>${escapeHtml(option || "—")}</option>`).join("")}</select>`;
+    }
+    if (column.type === "multiselect") {
+        return `<input class="b3-text-field fn__block" value="${escapeHtml(Array.isArray(value) ? value.join(", ") : String(value ?? ""))}" data-column="${column.id}" placeholder="逗号分隔" />`;
+    }
+    if (column.type === "url") {
+        return `<input class="b3-text-field fn__block" type="url" value="${escapeHtml(String(value ?? ""))}" data-column="${column.id}" />`;
+    }
+    if (column.type === "relation") {
+        return `<input class="b3-text-field fn__block" value="${escapeHtml(String(value ?? ""))}" data-column="${column.id}" readonly />`;
     }
     if (column.type === "rating" || column.type === "number") {
         return `<input class="b3-text-field fn__block" type="number" value="${escapeHtml(String(value ?? ""))}" data-column="${column.id}" />`;
@@ -40,7 +51,7 @@ export function openMatrixRow(host: PluginHost, project: MatrixProject, row: Mat
     <button class="b3-button b3-button--outline" data-act="row-note">打开/创建笔记</button>
     <button class="b3-button b3-button--outline" data-act="row-open-note" ${row.noteDocId ? "" : "disabled"}>打开已有笔记</button>
   </div>
-  <div class="pz-matrix-row-fields">${columns.map(column => `<label class="pz-matrix-row-field"><span>${escapeHtml(column.name)}</span>${field(column, row)}</label>`).join("")}</div>
+  <div class="pz-matrix-row-fields">${columns.map(column => `<label class="pz-matrix-row-field"><span>${escapeHtml(column.name)}</span>${field(project, column, row)}</label>`).join("")}</div>
   ${item?.abstract ? `<details style="margin-top:8px"><summary>Zotero 摘要</summary><p style="font-size:12px">${escapeHtml(item.abstract)}</p></details>` : ""}
 </div>
 <div class="b3-dialog__action"><button class="b3-button b3-button--cancel" data-act="row-cancel">关闭</button><div class="fn__space"></div><button class="b3-button b3-button--text" data-act="row-save">保存</button></div>`,

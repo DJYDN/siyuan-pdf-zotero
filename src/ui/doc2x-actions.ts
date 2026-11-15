@@ -5,6 +5,7 @@ import {doc2xActionOutputDir, doc2xErrorLogDir, parseWithDoc2x, translateWithDoc
 import {insertMarkdownAtCursor, uploadPngAsset} from "../siyuan";
 import {requireNode} from "../runtime";
 import {Pdf2zhHud} from "./pdf2zh-hud";
+import {effectiveTargetLang} from "../translation/target-lang";
 
 export interface Doc2xTarget {
     id: string;
@@ -97,7 +98,7 @@ export async function runDoc2xPdfAction(
             fileName: generated.split(/[\\/]/).pop() || generated,
             provider: "doc2x",
             mode,
-            targetLang: nextSettings.doc2xTargetLang,
+            targetLang: effectiveTargetLang(nextSettings, "doc2x"),
             sourceAttachmentId: target.sourceAttachmentId,
             sourceTitle: target.sourceTitle,
             createdAt: Date.now(),

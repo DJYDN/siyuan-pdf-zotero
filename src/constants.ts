@@ -6,6 +6,8 @@ export const TAB_TYPE = "pdf_zotero_reader";
 export const DOCK_TYPE = "pdf_zotero_dock";
 export const STORAGE_KEY = "state-v1";
 export const STATE_VERSION = 4;
+export const MATRIX_SCHEMA_VERSION = 1;
+export const MATRIX_MIGRATION_BACKUP_KEY = "matrix-migration-backup-v1";
 
 /** Custom SiYuan URL used by notes. Format: siyuan://plugins/<plugin>/annotation?id=<annotationId> */
 export const ANNOTATION_ROUTE = "annotation";

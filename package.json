@@ -1,6 +1,6 @@
 {
   "name": "siyuan-pdf-zotero",
-  "version": "0.9.21",
+  "version": "0.9.58",
   "private": true,
   "description": "Lightweight SiYuan PDF reader with PDF++ annotations, Zotero citations and CSL bibliographies",
   "license": "MIT",
@@ -14,12 +14,14 @@
   "devDependencies": {
     "@types/node": "22.18.12",
     "esbuild": "0.28.2",
+    "jsdom": "^29.1.1",
     "pdfjs-dist": "6.4.299",
     "siyuan": "1.2.9",
     "typescript": "5.9.3"
   },
   "dependencies": {
     "citeproc": "^2.4.63",
-    "katex": "^0.16.22"
+    "katex": "^0.16.22",
+    "mathlive": "^0.111.4"
   }
 }

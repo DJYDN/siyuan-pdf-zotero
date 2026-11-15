@@ -1,8 +1,8 @@
 {
   "name": "siyuan-pdf-zotero",
-  "author": "SiYuanArticleManger",
-  "url": "https://github.com/siyuan-note/plugin-sample",
-  "version": "0.9.21",
+  "author": "DJYDN",
+  "url": "https://github.com/DJYDN/siyuan-pdf-zotero",
+  "version": "0.9.58",
   "minAppVersion": "3.8.7",
   "backends": [
     "windows"
@@ -16,8 +16,8 @@
     "zh_CN": "PDF × Zotero"
   },
   "description": {
-    "default": "Lightweight PDF reader with PDF++ style excerpts, back-jumps, Zotero citations and CSL bibliographies.",
-    "zh_CN": "轻量 PDF 阅读、PDF++ 式摘录回跳、Zotero 引文与 CSL 参考文献。"
+    "default": "PDF reader with PDF++ style excerpts, local OCR (Pix2Text / UniMERNet / Texo), free selection translation, local whole-document PDF2zh translation, Zotero citations, literature matrix, note templates, PDF Q&A and AI automation.",
+    "zh_CN": "PDF 阅读与 PDF++ 式摘录回跳、本地 OCR（Pix2Text / UniMERNet / Texo）、免费划词翻译、本地 PDF2zh 整篇翻译、Zotero 引文、文献矩阵、笔记模板、PDF 问答与 AI 自动化。"
   },
   "readme": {
     "default": "README.md",
@@ -28,6 +28,12 @@
     "pdf",
     "zotero",
     "annotation",
-    "citation"
+    "ocr",
+    "formula",
+    "translation",
+    "citation",
+    "csl",
+    "matrix",
+    "template"
   ]
 }

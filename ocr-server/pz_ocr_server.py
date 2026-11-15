@@ -314,9 +314,13 @@ class Handler(BaseHTTPRequestHandler):
                 error = str(exc)
             self.send_json(200, {
                 "ok": ready,
-                "version": "pix2text-ocr-0.1",
+                "version": "pix2text-ocr-0.2",
+                "engine": "pz-shared",
+                "engines": ["pix2text", "unimernet"],
+                "capabilities": {"formula": True, "text": True, "mixed": True},
                 "modelReady": ready,
                 "models": config.get("modelDir", os.path.join(ROOT, "models")),
+                "pid": os.getpid(),
                 "error": error,
             })
             return

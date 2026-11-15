@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1600px; height: 900px; overflow: hidden; }
+  body {
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    color: #eaf6ff;
+    background:
+      radial-gradient(circle at 82% 18%, rgba(53, 208, 255, .20), transparent 34%),
+      radial-gradient(circle at 15% 85%, rgba(132, 100, 255, .18), transparent 40%),
+      linear-gradient(135deg, #06111f 0%, #0a1b31 48%, #071426 100%);
+    position: relative;
+  }
+  body::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(120, 220, 255, .045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120, 220, 255, .045) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: linear-gradient(to bottom, #000, transparent 82%);
+  }
+  .glow { position: absolute; filter: blur(90px); border-radius: 50%; opacity: .45; }
+  .glow.a { width: 420px; height: 420px; right: -80px; top: -90px; background: #1fb6ff; }
+  .glow.b { width: 360px; height: 360px; left: -120px; bottom: -120px; background: #7c5cff; }
+  .wrap { position: relative; z-index: 2; height: 100%; padding: 62px 72px 48px; display: flex; gap: 54px; }
+  .left { width: 700px; flex: 0 0 700px; display: flex; flex-direction: column; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 10px; width: fit-content;
+    padding: 9px 15px; border: 1px solid rgba(104, 224, 255, .35);
+    border-radius: 999px; color: #8be7ff; font-size: 16px; letter-spacing: .08em;
+    background: rgba(8, 33, 52, .65);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #5ff0c8; box-shadow: 0 0 14px #5ff0c8; }
+  h1 { margin: 28px 0 12px; font-size: 78px; line-height: 1.03; letter-spacing: -.03em; font-weight: 800; }
+  h1 .x { color: #69dcff; }
+  .sub { margin: 0; font-size: 27px; line-height: 1.5; color: #a9c7dc; }
+  .sub b { color: #f0fbff; font-weight: 600; }
+  .features { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+  .chip {
+    padding: 8px 13px; border-radius: 9px; font-size: 15px;
+    color: #b8d9e9; border: 1px solid rgba(130, 200, 230, .18);
+    background: rgba(12, 35, 55, .6);
+  }
+  .bottom { margin-top: auto; display: flex; align-items: center; gap: 14px; color: #7394a8; font-size: 14px; }
+  .line { height: 1px; width: 54px; background: linear-gradient(90deg, #3bc9f4, transparent); }
+  .right { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; }
+  .shot {
+    position: absolute; border-radius: 16px; overflow: hidden;
+    border: 1px solid rgba(139, 226, 255, .28);
+    box-shadow: 0 34px 90px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255,255,255,.04) inset;
+    background: #0b1b2b;
+  }
+  .shot img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: left top; }
+  .shot.main { width: 690px; height: 430px; transform: rotate(-1.2deg); }
+  .shot.back {
+    width: 560px; height: 330px; right: -28px; bottom: 104px; opacity: .55;
+    transform: rotate(5deg); filter: saturate(.8);
+  }
+  .shot.third {
+    width: 430px; height: 245px; left: -30px; bottom: 36px; opacity: .38;
+    transform: rotate(-7deg);
+  }
+  .cap {
+    position: absolute; right: 0; bottom: 0; padding: 8px 12px; font-size: 13px;
+    color: #90b4c8; border: 1px solid rgba(120, 210, 240, .2); border-radius: 8px;
+    background: rgba(5, 18, 31, .8);
+  }
+  .accent { color: #62e7c4; }
+</style>
+</head>
+<body>
+  <div class="glow a"></div><div class="glow b"></div>
+  <div class="wrap">
+    <div class="left">
+      <div class="badge"><span class="dot"></span> SiYuan Plugin · Local First</div>
+      <h1>PDF <span class="x">×</span> Zotero</h1>
+      <p class="sub">在思源里完成 <b>阅读、标注、引文、公式 OCR、文献矩阵与笔记模板</b>。<br>本地优先，不修改原始 PDF。</p>
+      <div class="features">
+        <div class="chip">免费划词翻译</div>
+        <div class="chip">本地 PDF2zh 翻译</div>
+        <div class="chip">纯英文 / 中英对照</div>
+        <div class="chip">Pix2Text / UniMERNet</div>
+        <div class="chip">Zotero · CSL</div>
+        <div class="chip">文献矩阵 · 笔记模板</div>
+      </div>
+      <div class="bottom"><span class="line"></span><span>SiYuan 3.8.7+ · Desktop · Windows</span></div>
+    </div>
+    <div class="right">
+      <div class="shot back"><img src="file:///F:/study/VStudio/SiYuanArticleManger/matrix-ui.png" alt=""></div>
+      <div class="shot third"><img src="file:///F:/study/VStudio/SiYuanArticleManger/template-created.png" alt=""></div>
+      <div class="shot main"><img src="file:///F:/study/VStudio/SiYuanArticleManger/desktop-ocr-preview.png" alt=""></div>
+      <div class="cap">PDF 框选 OCR · 97.2% confidence</div>
+    </div>
+  </div>
+</body>
+</html>

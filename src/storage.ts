@@ -1,6 +1,8 @@
 import type {Plugin} from "siyuan";
-import {STATE_VERSION, STORAGE_KEY} from "./constants";
+import {MATRIX_MIGRATION_BACKUP_KEY, MATRIX_SCHEMA_VERSION, STATE_VERSION, STORAGE_KEY} from "./constants";
 import {defaultTranslationServices} from "./translation/defaults";
+import {migrateMatrixProject} from "./matrix/model";
+import {normalizeEngineMap} from "./ocr/engines";
 import type {
     Annotation,
     Book,
@@ -99,6 +101,7 @@ export function defaultState(): PersistedState {
             translationAuto: true,
             translationMinChars: 2,
             translationTargetLang: "zh-CN",
+            translationDefaultTargetLang: "zh-CN",
             translationShowOriginal: true,
             translationActiveServiceId: "translation-bing",
             translationServices: defaultTranslationServices(),
@@ -145,6 +148,17 @@ export function defaultState(): PersistedState {
             unimernetPath: "",
             unimernetConfigPath: "",
             unimernetDevice: "auto",
+            ocrEngines: {
+                pix2text: {enabled: true, dir: "", port: 8891, autoStart: true},
+                unimernet: {enabled: false, dir: "", port: 8892, autoStart: true},
+                texo: {enabled: false, dir: "", port: 8893, autoStart: true},
+            },
+            ocrSharedRuntimeDir: "",
+            ocrFormulaOrder: ["texo", "unimernet", "pix2text"],
+            ocrTextEngine: "pix2text",
+            ocrPreviewRenderer: "katex",
+            ocrAutoCopy: false,
+            ocrAutoCopyFormat: "latex",
             noteTemplateActiveId: "",
             noteTemplateNotebookId: "",
             noteTemplateFolder: "",
@@ -201,13 +215,24 @@ export class Store {
         } catch (e) {
             console.warn("[pdf-zotero] loadData failed", e);
         }
-        const parsed = this.parseState(raw);
+        let parsed: PersistedState | null = null;
+        try {
+            const rawForMatrix = raw && typeof raw === "object" ? raw : null;
+            const needsMatrixMigration = rawForMatrix && Array.isArray(rawForMatrix.matrixProjects)
+                && rawForMatrix.matrixProjects.some((project: any) => Number(project?.schemaVersion || 0) < MATRIX_SCHEMA_VERSION);
+            if (needsMatrixMigration) {
+                await this.plugin.saveData(MATRIX_MIGRATION_BACKUP_KEY, rawForMatrix);
+            }
+            parsed = this.parseState(raw);
+        } catch (error) {
+            console.warn("[pdf-zotero] matrix migration failed", error);
+        }
         if (parsed) {
             this.state = parsed;
             await this.writeBackup(raw);
             return;
         }
-        for (const key of BACKUP_KEYS) {
+        for (const key of [...BACKUP_KEYS, MATRIX_MIGRATION_BACKUP_KEY]) {
             try {
                 const backup = await this.plugin.loadData(key);
                 const recovered = this.parseState(backup);
@@ -276,8 +301,20 @@ export class Store {
     private migrate(raw: Partial<PersistedState>): PersistedState {
         const base = defaultState();
         const settings = {...base.settings, ...(raw.settings || {})};
+        // v4: single shared OCR service -> per-engine sidecars. Preserve the old
+        // layout by pointing Pix2Text/UniMERNet at the same legacy service directory.
+        const rawSettings = (raw.settings && typeof raw.settings === "object" ? raw.settings : {}) as Record<string, any>;
+        const persistedEngines = rawSettings.ocrEngines && typeof rawSettings.ocrEngines === "object" ? rawSettings.ocrEngines : null;
+        settings.ocrEngines = normalizeEngineMap(persistedEngines, settings);
+        if (!Array.isArray(settings.ocrFormulaOrder) || !settings.ocrFormulaOrder.length) {
+            settings.ocrFormulaOrder = ["texo", "unimernet", "pix2text"];
+        }
         if (!Array.isArray(settings.translationServices) || !settings.translationServices.length) {
             settings.translationServices = defaultTranslationServices();
+        }
+        // Shared translation target language; older snapshots only had per-engine values.
+        if (!settings.translationDefaultTargetLang) {
+            settings.translationDefaultTargetLang = settings.translationTargetLang || "zh-CN";
         }
         for (const service of settings.translationServices) {
             if (service.type === "bing" && /cn\.bing\.com/i.test(service.baseURL || "")) {
@@ -306,7 +343,7 @@ export class Store {
             recentAttachmentIds: Array.isArray(raw.recentAttachmentIds) ? raw.recentAttachmentIds : [],
             translationOutputs: raw.translationOutputs && typeof raw.translationOutputs === "object" ? raw.translationOutputs : {},
             ocrHistory: Array.isArray(raw.ocrHistory) ? raw.ocrHistory : [],
-            matrixProjects: Array.isArray(raw.matrixProjects) ? raw.matrixProjects : [],
+            matrixProjects: (Array.isArray(raw.matrixProjects) ? raw.matrixProjects : []).map(item => migrateMatrixProject(item).project),
             matrixActiveProjectId: typeof raw.matrixActiveProjectId === "string" ? raw.matrixActiveProjectId : "",
             noteTemplates: Array.isArray(raw.noteTemplates) ? raw.noteTemplates : [],
             templateNotes: raw.templateNotes && typeof raw.templateNotes === "object" ? raw.templateNotes : {},

@@ -1,0 +1,23 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage[bookmarks=true,bookmarksnumbered=true,pdfborder={0 0 0}]{hyperref}
+\begin{document}
+\tableofcontents
+\newpage
+\section{Introduction}\label{sec:intro}
+This is the introduction. It contains the searchable needle alpha.
+See Section~\ref{sec:methods} for methods, and visit \href{https://example.com}{the example site}.
+
+\newpage
+\section{Background}
+Background text with another searchable needle beta. This paragraph exists to verify multi-line selection.
+More background text. More background text. More background text.
+
+\newpage
+\section{Methods}\label{sec:methods}
+Methods text with searchable needle gamma. Back to \hyperref[sec:intro]{Introduction}.
+
+\newpage
+\section{Results}
+Results text with searchable needle delta.
+\end{document}

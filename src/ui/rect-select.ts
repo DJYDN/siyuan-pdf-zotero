@@ -135,7 +135,18 @@ export class RectSelectTool {
         document.removeEventListener("mouseup", this.onMouseUp);
     }
 
+    private readonly onKeyDown = (event: KeyboardEvent) => {
+        if (!this.active || event.key !== "Escape") {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        this.cleanup();
+        this.setActive(false);
+    };
+
     bind(): void {
         this.pagesElement.addEventListener("mousedown", this.onMouseDown, true);
+        this.pagesElement.ownerDocument.addEventListener("keydown", this.onKeyDown, true);
     }
 }

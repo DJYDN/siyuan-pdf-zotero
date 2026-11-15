@@ -58,6 +58,7 @@ function run() {
     const files = [
         ["plugin.json", "plugin.json"],
         ["icon.png", "icon.png"],
+        ["preview.png", "preview.png"],
         ["README.md", "README.md"],
     ];
     for (const [from, to] of files) {
@@ -84,6 +85,22 @@ function run() {
     const katexRoot = path.join(root, "node_modules", "katex", "dist");
     fs.copyFileSync(path.join(katexRoot, "katex.min.css"), path.join(dist, "katex.min.css"));
     fs.cpSync(path.join(katexRoot, "fonts"), path.join(dist, "fonts"), {recursive: true});
+    // MathLive is loaded on demand by the OCR result dialog (renderer switch + MathML copy).
+    const mathliveRoot = path.join(root, "node_modules", "mathlive");
+    const mathliveDist = path.join(dist, "mathlive");
+    fs.mkdirSync(mathliveDist, {recursive: true});
+    for (const file of ["mathlive.min.js", "mathlive-fonts.css", "mathlive-static.css"]) {
+        const from = path.join(mathliveRoot, file);
+        if (fs.existsSync(from)) {
+            fs.copyFileSync(from, path.join(mathliveDist, file));
+        } else {
+            console.warn(`[build] missing mathlive asset: ${file}`);
+        }
+    }
+    const mathliveFonts = path.join(mathliveRoot, "fonts");
+    if (fs.existsSync(mathliveFonts)) {
+        fs.cpSync(mathliveFonts, path.join(mathliveDist, "fonts"), {recursive: true});
+    }
     console.log("[build] dist ready:", dist);
     const size = (p) => (fs.statSync(p).size / 1024 / 1024).toFixed(2) + " MiB";
     console.log(`[build] dist/index.js ${size(path.join(dist, "index.js"))}`);

@@ -1,4 +1,11 @@
-import type {Settings} from "../types";
+import type {OcrEngineId, Settings} from "../types";
+import {
+    engineConfig,
+    needsLegacyUnimernetOptions,
+    OCR_ENGINE_DEFS,
+    serviceGroupForEngine,
+    type OcrServiceGroup,
+} from "./engines";
 
 export interface OcrItem {
     type: "formula" | "text" | "mixed";
@@ -15,31 +22,66 @@ export interface OcrResult {
     items: OcrItem[];
     elapsedMs?: number;
     engine?: string;
+    /** Number of decoded tokens (Texo only). */
+    tokens?: number;
+    /** How decoding stopped: eos | limit | repeat (Texo only). */
+    finish?: string;
+    /** True when the engine hit its token limit or a safety guard. */
+    truncated?: boolean;
+    /** Optional engine notice, e.g. "Texo only supports formulas". */
+    notice?: string;
+}
+
+export interface OcrHealth {
+    ok: boolean;
+    version?: string;
+    engine?: string;
+    modelReady?: boolean;
+    capabilities?: {formula?: boolean; text?: boolean; mixed?: boolean};
+    error?: string;
+    pid?: number;
+    missing?: string[];
 }
 
 export class OcrHttpError extends Error {
-    constructor(message: string, readonly status = 0) {
+    constructor(message: string, readonly status = 0, readonly engine?: OcrEngineId) {
         super(message);
         this.name = "OcrHttpError";
     }
 }
 
-export function ocrBaseUrl(settings: Settings): string {
-    const port = Number(settings.ocrPort) || 8891;
-    return `http://127.0.0.1:${port}`;
+export function ocrBaseUrlForPort(port: number): string {
+    return `http://127.0.0.1:${Number(port) || OCR_ENGINE_DEFS.pix2text.defaultPort}`;
 }
 
-export async function getOcrHealth(settings: Settings): Promise<{ok: boolean; version?: string; modelReady?: boolean; error?: string}> {
+/** Base URL of the service that hosts `engine` (engines sharing a directory share a port). */
+export function ocrServiceUrl(settings: Settings, engine?: OcrEngineId): string {
+    const id = engine || "pix2text";
+    const group = serviceGroupForEngine(settings, id);
+    const port = group?.port ?? engineConfig(settings, id).port ?? OCR_ENGINE_DEFS[id].defaultPort;
+    return ocrBaseUrlForPort(port);
+}
+
+/** Legacy helper kept for callers that only know the old single-service settings. */
+export function ocrBaseUrl(settings: Settings): string {
+    return ocrServiceUrl(settings, "pix2text");
+}
+
+export async function getOcrHealth(settings: Settings, engine: OcrEngineId = "pix2text", timeoutMs = 4000): Promise<OcrHealth> {
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 4000);
+    const timer = window.setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
     try {
-        const response = await fetch(`${ocrBaseUrl(settings)}/health`, {signal: controller.signal});
+        const response = await fetch(`${ocrServiceUrl(settings, engine)}/health`, {signal: controller.signal});
         const data = await response.json().catch((): any => ({}));
         return {
             ok: response.ok && data?.ok !== false,
             version: String(data?.version || ""),
+            engine: String(data?.engine || ""),
             modelReady: data?.modelReady !== false,
+            capabilities: data?.capabilities && typeof data.capabilities === "object" ? data.capabilities : undefined,
             error: response.ok ? String(data?.error || "") : `HTTP ${response.status}`,
+            pid: Number.isFinite(Number(data?.pid)) ? Number(data.pid) : undefined,
+            missing: Array.isArray(data?.missing) ? data.missing.map((item: any) => String(item)) : undefined,
         };
     } catch (error: any) {
         return {ok: false, error: error?.name === "AbortError" ? "OCR 服务连接超时" : (error?.message || String(error))};
@@ -60,16 +102,38 @@ function blobToBase64(blob: Blob): Promise<string> {
     });
 }
 
-export async function recognizeImage(
+function requestOptions(settings: Settings, engine: OcrEngineId, group?: OcrServiceGroup): Record<string, unknown> {
+    const options: Record<string, unknown> = {
+        engine,
+        device: settings.ocrDevice || "cpu",
+        enableTable: Boolean(settings.ocrEnableTable),
+        enableSpellChecker: settings.ocrEnableSpellChecker !== false,
+        mfdModel: settings.ocrMfdModel || "mfd-1.5",
+        mfrModel: settings.ocrMfrModel || "mfr-1.5",
+        mfdStaticShape: settings.ocrMfdStaticShape || "",
+        mfrContext: settings.ocrMfrContext || "",
+        languages: settings.ocrLanguages?.length ? settings.ocrLanguages : ["zh", "en"],
+    };
+    if (engine === "unimernet" || needsLegacyUnimernetOptions(settings, group)) {
+        options.unimernetPath = settings.unimernetPath || "";
+        options.unimernetConfigPath = settings.unimernetConfigPath || "";
+        options.unimernetDevice = settings.unimernetDevice || "auto";
+    }
+    return options;
+}
+
+export async function recognizeWithEngine(
     settings: Settings,
+    engine: OcrEngineId,
     blob: Blob,
     options: {mode?: "auto" | "formula" | "text"; source?: "pdf-region" | "clipboard"} = {},
 ): Promise<OcrResult> {
     const imageBase64 = await blobToBase64(blob);
+    const group = serviceGroupForEngine(settings, engine);
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), Math.max(1000, Number(settings.ocrTimeoutMs) || 120_000));
     try {
-        const response = await fetch(`${ocrBaseUrl(settings)}/ocr`, {
+        const response = await fetch(`${ocrServiceUrl(settings, engine)}/ocr`, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             signal: controller.signal,
@@ -79,25 +143,12 @@ export async function recognizeImage(
                 source: options.source || "pdf-region",
                 languages: settings.ocrLanguages?.length ? settings.ocrLanguages : ["zh", "en"],
                 formulaFormat: settings.ocrFormulaFormat || "inline",
-                options: {
-                    engine: settings.ocrEngine || "pix2text",
-                    unimernetPath: settings.unimernetPath || "",
-                    unimernetConfigPath: settings.unimernetConfigPath || "",
-                    unimernetDevice: settings.unimernetDevice || "auto",
-                    device: settings.ocrDevice || "cpu",
-                    enableTable: Boolean(settings.ocrEnableTable),
-                    enableSpellChecker: settings.ocrEnableSpellChecker !== false,
-                    mfdModel: settings.ocrMfdModel || "mfd-1.5",
-                    mfrModel: settings.ocrMfrModel || "mfr-1.5",
-                    mfdStaticShape: settings.ocrMfdStaticShape || "",
-                    mfrContext: settings.ocrMfrContext || "",
-                    languages: settings.ocrLanguages?.length ? settings.ocrLanguages : ["zh", "en"],
-                },
+                options: requestOptions(settings, engine, group),
             }),
         });
         const data = await response.json().catch((): any => ({}));
         if (!response.ok || data?.ok === false) {
-            throw new OcrHttpError(String(data?.error || data?.message || `OCR HTTP ${response.status}`), response.status);
+            throw new OcrHttpError(String(data?.error || data?.message || `OCR HTTP ${response.status}`), response.status, engine);
         }
         const items: OcrItem[] = Array.isArray(data?.items) ? data.items.map((item: any) => ({
             type: item?.type === "text" ? "text" : "formula",
@@ -112,14 +163,36 @@ export async function recognizeImage(
             markdown: String(data?.markdown || ""),
             items,
             elapsedMs: Number(data?.elapsedMs || 0),
-            engine: String(data?.engine || ""),
+            engine: String(data?.engine || engine),
+            tokens: Number.isFinite(Number(data?.tokens)) ? Number(data.tokens) : undefined,
+            finish: typeof data?.finish === "string" ? data.finish : undefined,
+            truncated: Boolean(data?.truncated),
+            notice: typeof data?.notice === "string" ? data.notice : undefined,
         };
     } catch (error: any) {
         if (error instanceof OcrHttpError) throw error;
-        throw new OcrHttpError(error?.name === "AbortError" ? "OCR 识别超时" : (error?.message || String(error)));
+        throw new OcrHttpError(error?.name === "AbortError" ? "OCR 识别超时" : (error?.message || String(error)), 0, engine);
     } finally {
         window.clearTimeout(timer);
     }
+}
+
+/**
+ * Single-engine recognition using the default routing for the current mode.
+ * Prefer `recognizeWithFallback` (in `ocr/service.ts`) inside the plugin.
+ */
+export async function recognizeImage(
+    settings: Settings,
+    blob: Blob,
+    options: {mode?: "auto" | "formula" | "text"; source?: "pdf-region" | "clipboard"} = {},
+): Promise<OcrResult> {
+    const mode = options.mode || settings.ocrDefaultMode || "auto";
+    const {enginesForMode} = await import("./engines");
+    const engines = enginesForMode(settings, mode);
+    if (!engines.length) {
+        throw new OcrHttpError("没有可用的 OCR 引擎，请先在设置 → OCR 启用一个引擎并选择服务目录");
+    }
+    return recognizeWithEngine(settings, engines[0], blob, {...options, mode});
 }
 
 export function ocrItemsToMarkdown(result: OcrResult, formulaFormat: "inline" | "display"): string {

@@ -59,6 +59,27 @@ test("Store recovers a corrupted primary state from backup-1", async () => {
     assert.equal(written.books["book-recover"].title, "Recovered book");
 });
 
+test("Store recovers matrix state from the migration backup", async () => {
+    const plugin = fakePlugin();
+    const store = new Store(plugin);
+    store.state.matrixProjects = [{
+        id: "mx-recover", name: "Recovered matrix", collectionKeys: [], columns: [], rows: [],
+        views: [], schemaVersion: 1, schemaReviewed: true, createdAt: 1, updatedAt: 1,
+    }];
+    await store.save();
+    await store.backupNow();
+    plugin.data["state-v1"] = "not json";
+    plugin.data["matrix-migration-backup-v1"] = plugin.data["state-backup-1"];
+    delete plugin.data["state-backup-1"];
+    delete plugin.data["state-backup-2"];
+
+    const recovered = new Store(plugin);
+    await recovered.load();
+
+    assert.equal(recovered.recoveredFromBackup, "matrix-migration-backup-v1");
+    assert.equal(recovered.state.matrixProjects[0].name, "Recovered matrix");
+});
+
 test("Store falls back to defaults when primary and backups are unusable", async () => {
     const plugin = fakePlugin();
     plugin.data["state-v1"] = "not json";

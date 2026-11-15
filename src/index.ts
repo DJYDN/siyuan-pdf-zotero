@@ -8,6 +8,7 @@ import {insertCitation, refreshDocumentCitations} from "./citations";
 import type {NoteInsertionTarget, PluginHost} from "./host";
 import {detectZoteroDataDir, fileExists, hasNodeFs, pluginAssetUrl, readFileBytes, requireNode} from "./runtime";
 import {openSettings, renderDock} from "./ui/dock";
+import {openMatrix} from "./ui/matrix-workspace";
 import {PdfReader} from "./ui/reader";
 import {CSS} from "./ui/styles";
 import {PdfZoteroService} from "./service";
@@ -18,11 +19,11 @@ import {pdfjsLib} from "./pdf/pdfjs";
 import {ZoteroClient} from "./zotero/client";
 import {syncTranslationHistory} from "./translation/history";
 import {readClipboardImage} from "./ocr/capture";
-import {recognizeImage} from "./ocr/client";
-import {ensureOcrServer} from "./ocr/service";
+import {recognizeWithFallback} from "./ocr/service";
 import {openOcrResultDialog} from "./ui/ocr-dialog";
 import {applyQaBlockTheme, repairQaBlockAttributes} from "./qa/theme";
 import {NotebookAutomation} from "./automation/service";
+import {bindFormulaFormatMenu} from "./ui/formula-format";
 
 const ICON_ID = "iconPdfZotero";
 const STYLE_ID = "pdf-zotero-style";
@@ -68,6 +69,7 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
     private zoteroRefreshPromise: Promise<void> | null = null;
     private zoteroOpenItems = new Set<string>();
     private automation: NotebookAutomation | null = null;
+    private unbindFormulaFormatMenu: (() => void) | null = null;
     private unloading = false;
     private readonly onBeforeUnload = (): void => {
         this.unloading = true;
@@ -283,6 +285,7 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
             document.addEventListener("selectionchange", this.rememberNoteSelectionBound);
             document.addEventListener("paste", this.onPastePdfCallout, true);
             document.addEventListener("click", this.onSharedToolbarClick, true);
+            this.unbindFormulaFormatMenu = bindFormulaFormatMenu();
             window.addEventListener("beforeunload", this.onBeforeUnload);
             const initialEditor = getActiveEditor() || getAllEditor()[0];
             this.lastNoteDocId = String(initialEditor?.protyle?.block?.rootID || "");
@@ -633,6 +636,8 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
         document.removeEventListener("selectionchange", this.rememberNoteSelectionBound);
         document.removeEventListener("paste", this.onPastePdfCallout, true);
         document.removeEventListener("click", this.onSharedToolbarClick, true);
+        this.unbindFormulaFormatMenu?.();
+        this.unbindFormulaFormatMenu = null;
         this.calloutObserver?.disconnect();
         this.calloutObserver = null;
         window.clearTimeout(this.calloutStyleTimer);
@@ -825,6 +830,13 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
             },
         });
         this.addCommand({
+            langKey: "openMatrixWorkspace",
+            langText: "打开文献矩阵",
+            execute: () => {
+                openMatrix(this);
+            },
+        });
+        this.addCommand({
             langKey: "refreshZoteroCitations",
             langText: "刷新当前文档参考文献",
             execute: () => {
@@ -902,17 +914,14 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
         try {
             const blob = await readClipboardImage();
             const settings = this.store.state.settings;
-            if (!settings.ocrServerPath?.trim()) {
-                showMessage("请先在设置 → OCR 中选择本地服务目录", 4000, "error");
-                return;
-            }
-            const server = await ensureOcrServer(settings);
-            if (!server.ok) throw new Error(server.error || "OCR 服务不可用");
-            const result = await recognizeImage(settings, blob, {mode: settings.ocrDefaultMode, source: "clipboard"});
+            const outcome = await recognizeWithFallback(settings, blob, {mode: settings.ocrDefaultMode, source: "clipboard"});
+            const result = outcome.result;
             if (!result.items.length && !result.markdown.trim()) throw new Error("OCR 没有返回内容");
             openOcrResultDialog(this, result, {
                 imageBlob: blob,
                 source: "clipboard",
+                engine: outcome.engine,
+                attempts: outcome.attempts,
                 insertionTarget: this.captureNoteInsertionTarget(),
             });
         } catch (error: any) {

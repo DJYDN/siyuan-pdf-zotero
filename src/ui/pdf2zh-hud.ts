@@ -8,17 +8,31 @@ export class Pdf2zhHud {
     private readonly logElement: HTMLElement;
     private readonly logs: string[] = [];
     private hideTimer = 0;
+    private destroyed = false;
+    private cancelled = false;
     private readonly provider: string;
     private readonly isOcr: boolean;
+    private readonly onCancel?: () => void;
+    private readonly onEscape = (event: KeyboardEvent): void => {
+        if (event.key !== "Escape" || this.destroyed) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        this.cancelled = true;
+        this.onCancel?.();
+        this.destroy();
+    };
     private readonly onOutsidePointerDown = (event: PointerEvent): void => {
         if (this.panel.hidden) return;
         if (this.root.contains(event.target as Node)) return;
         this.panel.hidden = true;
     };
 
-    constructor(provider = "PDF2zh") {
+    constructor(provider = "PDF2zh", options: {onCancel?: () => void} = {}) {
         this.provider = provider;
         this.isOcr = provider === "OCR";
+        this.onCancel = options.onCancel;
         this.root = document.createElement("div");
         this.root.className = "pz-pdf2zh-hud";
         this.root.dataset.state = "running";
@@ -52,7 +66,13 @@ export class Pdf2zhHud {
             this.destroy();
         });
         this.ring.style.setProperty("--pz-progress", "0");
+        document.addEventListener("keydown", this.onEscape, true);
         document.body.append(this.root);
+    }
+
+    /** True once the user pressed Esc / closed the running progress. */
+    isCancelled(): boolean {
+        return this.cancelled;
     }
 
     setProgress(progress: number, status?: string): void {
@@ -110,8 +130,13 @@ export class Pdf2zhHud {
     }
 
     destroy(): void {
+        if (this.destroyed) {
+            return;
+        }
+        this.destroyed = true;
         window.clearTimeout(this.hideTimer);
         document.removeEventListener("pointerdown", this.onOutsidePointerDown, {capture: true});
+        document.removeEventListener("keydown", this.onEscape, true);
         this.root.remove();
     }
 }

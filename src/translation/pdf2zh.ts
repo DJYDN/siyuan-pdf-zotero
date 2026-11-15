@@ -1,5 +1,6 @@
 import {fileExists, readFileBytes, requireNode, siyuanDataDir} from "../runtime";
 import type {Settings} from "../types";
+import {effectiveTargetLang} from "./target-lang";
 
 export interface Pdf2zhTask {
     taskId: string;
@@ -194,7 +195,7 @@ export class Pdf2zhClient {
             engine,
             service: normalizeService(settings.pdf2zhService || (engine === "pdf2zh_next" ? "siliconflowfree" : "bing")),
             sourceLang: settings.pdf2zhSourceLang || "en",
-            targetLang: settings.pdf2zhTargetLang || "zh-CN",
+            targetLang: effectiveTargetLang(settings, "pdf2zh"),
             fileName,
             fileContent: base64,
             asyncJob: true,
@@ -264,7 +265,7 @@ export function translationOutputDir(settings?: Settings): string {
 export function translationOutputPath(attachmentId: string, fingerprint: string, settings: Settings): string {
     const safe = (fingerprint || attachmentId).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24);
     const service = normalizeService(settings.pdf2zhService || "default").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24);
-    return `${translationOutputDir(settings)}/pdf2zh-${safe}-${settings.pdf2zhEngine}-${service}-${settings.pdf2zhOutputMode}-${settings.pdf2zhDualMode}-${settings.pdf2zhTargetLang.replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`;
+    return `${translationOutputDir(settings)}/pdf2zh-${safe}-${settings.pdf2zhEngine}-${service}-${settings.pdf2zhOutputMode}-${settings.pdf2zhDualMode}-${effectiveTargetLang(settings, "pdf2zh").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`;
 }
 
 export function writeTranslationPdf(filePath: string, data: Buffer): void {

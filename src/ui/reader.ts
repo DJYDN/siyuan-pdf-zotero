@@ -23,6 +23,7 @@ import {applyQaBlockTheme} from "../qa/theme";
 import {renderQaMarkdown} from "../qa/render";
 import {activeTranslationService} from "../translation/defaults";
 import {translateText} from "../translation/service";
+import {effectiveTargetLang} from "../translation/target-lang";
 import {choosePdf2zhOutput, ensurePdf2zhServer, Pdf2zhClient, translationOutputPath, writeTranslationPdf} from "../translation/pdf2zh";
 import {checkDoc2xEnvironment, doc2xOutputPath, translateWithDoc2x} from "../translation/doc2x";
 import type {NoteInsertionTarget, PluginHost} from "../host";
@@ -30,9 +31,9 @@ import {PreviewManager} from "./preview";
 import {ScreenshotTool} from "./screenshot";
 import {RectSelectTool, type RectSelection} from "./rect-select";
 import {Pdf2zhHud} from "./pdf2zh-hud";
-import {recognizeImage, type OcrResult} from "../ocr/client";
+import type {OcrResult} from "../ocr/client";
+import {recognizeWithFallback, type OcrAttempt} from "../ocr/service";
 import {openOcrResultDialog} from "./ocr-dialog";
-import {ensureOcrServer} from "../ocr/service";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 function qaSessionGroup(timestamp: number): string {
@@ -656,6 +657,7 @@ export class PdfReader {
                 this.updateScreenshotButton();
             }
             this.rectSelect?.setActive(false);
+            this.ocrRectSelect?.setActive(false);
         } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
             if (this.element.contains(document.activeElement) || this.element.offsetParent) {
                 event.preventDefault();
@@ -2945,7 +2947,8 @@ export class PdfReader {
             return;
         }
         const client = new Pdf2zhClient(settings.pdf2zhBaseUrl);
-        const hud = new Pdf2zhHud();
+        let cancelled = false;
+        const hud = new Pdf2zhHud("PDF2zh", {onCancel: () => { cancelled = true; }});
         hud.setIndeterminate("正在检查 PDF2zh 服务…");
         try {
             const server = await ensurePdf2zhServer(settings);
@@ -2956,7 +2959,7 @@ export class PdfReader {
             const outputPath = translationOutputPath(attachment.id, attachment.fingerprint, settings);
             if (fileExists(outputPath)) {
                 hud.complete("使用已有翻译缓存");
-                this.recordTranslationOutput(outputPath, "pdf2zh", settings.pdf2zhOutputMode, settings.pdf2zhTargetLang);
+                this.recordTranslationOutput(outputPath, "pdf2zh", settings.pdf2zhOutputMode, effectiveTargetLang(settings, "pdf2zh"));
                 const cached = await this.host.importLocalPath(outputPath);
                 if (cached) this.host.openAttachment(cached);
                 return;
@@ -2969,7 +2972,7 @@ export class PdfReader {
             let progressLogCount = 0;
             let progressPollBusy = false;
             const progressTimer = window.setInterval(async () => {
-                if (progressPollBusy) return;
+                if (progressPollBusy || cancelled) return;
                 progressPollBusy = true;
                 try {
                     const progress = await client.progress();
@@ -2989,6 +2992,9 @@ export class PdfReader {
                 window.clearInterval(waitTimer);
                 window.clearInterval(progressTimer);
             }
+            if (cancelled) {
+                throw new Error("已退出整篇翻译");
+            }
             if (!task.taskId) {
                 task.progress = 100;
                 task.finished = true;
@@ -2996,6 +3002,9 @@ export class PdfReader {
             }
             const startedAt = Date.now();
             while (!task.finished && task.status !== "完成" && task.status !== "失败") {
+                if (cancelled) {
+                    throw new Error("已退出整篇翻译");
+                }
                 if (Date.now() - startedAt > 45 * 60_000) {
                     throw new Error("PDF2zh 翻译超时");
                 }
@@ -3003,6 +3012,9 @@ export class PdfReader {
                 await new Promise(resolve => setTimeout(resolve, 1200));
                 if (!task.taskId) throw new Error("PDF2zh 没有返回任务 ID");
                 const current = await client.task(task.taskId);
+                if (cancelled) {
+                    throw new Error("已退出整篇翻译");
+                }
                 if (current) {
                     task = current;
                     const value = Math.max(0, Math.min(100, Number(task.progress) || 0));
@@ -3028,6 +3040,10 @@ export class PdfReader {
                 hud.fail("翻译完成，但无法打开生成文件");
             }
         } catch (error: any) {
+            if (cancelled) {
+                showMessage("已退出整篇翻译（PDF2zh 服务端可能仍在处理，稍后可再次打开译文缓存）", 4000);
+                return;
+            }
             hud.fail(String(error?.message || error || "PDF2zh 翻译失败"));
         }
     }
@@ -3064,12 +3080,13 @@ export class PdfReader {
         };
         const cached = findPdf(outputDir);
         if (cached) {
-            this.recordTranslationOutput(cached, "doc2x", settings.doc2xOutputMode, settings.doc2xTargetLang);
+            this.recordTranslationOutput(cached, "doc2x", settings.doc2xOutputMode, effectiveTargetLang(settings, "doc2x"));
             const imported = await this.host.importLocalPath(cached);
             if (imported) this.host.openAttachment(imported);
             return;
         }
-        const hud = new Pdf2zhHud("Doc2X");
+        let cancelled = false;
+        const hud = new Pdf2zhHud("Doc2X", {onCancel: () => { cancelled = true; }});
         hud.setIndeterminate("正在检查 Doc2X 环境…");
         try {
             const check = await checkDoc2xEnvironment(settings);
@@ -3079,6 +3096,7 @@ export class PdfReader {
             hud.setStatus("正在调用 Doc2X CLI…");
             const startedAt = Date.now();
             const timer = window.setInterval(() => {
+                if (cancelled) return;
                 hud.setWaiting(Math.floor((Date.now() - startedAt) / 1000));
             }, 1000);
             let result: Awaited<ReturnType<typeof translateWithDoc2x>>;
@@ -3087,9 +3105,13 @@ export class PdfReader {
             } finally {
                 window.clearInterval(timer);
             }
+            if (cancelled) {
+                showMessage("已退出整篇翻译（Doc2X CLI 可能仍在运行）", 4000);
+                return;
+            }
             const generated = result.files[0];
             if (!generated) throw new Error("Doc2X 没有返回 PDF");
-            this.recordTranslationOutput(generated, "doc2x", settings.doc2xOutputMode, settings.doc2xTargetLang);
+            this.recordTranslationOutput(generated, "doc2x", settings.doc2xOutputMode, effectiveTargetLang(settings, "doc2x"));
             hud.complete("Doc2X 翻译完成");
             const imported = await this.host.importLocalPath(generated);
             if (imported) {
@@ -3098,6 +3120,10 @@ export class PdfReader {
                 hud.fail("Doc2X 翻译完成，但无法打开生成文件");
             }
         } catch (error: any) {
+            if (cancelled) {
+                showMessage("已退出整篇翻译（Doc2X CLI 可能仍在运行）", 4000);
+                return;
+            }
             hud.fail(String(error?.message || error || "Doc2X 翻译失败"));
         }
     }
@@ -3120,7 +3146,8 @@ export class PdfReader {
         }
         const text = selection.text.trim();
         const seq = ++this.translationSeq;
-        const cacheKey = `${service.id}\u0000${settings.translationTargetLang}\u0000${text}`;
+        const targetLang = effectiveTargetLang(settings, "selection");
+        const cacheKey = `${service.id}\u0000${targetLang}\u0000${text}`;
         const cached = this.translationCache.get(cacheKey);
         if (cached) {
             this.showTranslationPopup(text, cached, service.name, false);
@@ -3128,7 +3155,7 @@ export class PdfReader {
         }
         this.showTranslationPopup(text, "正在翻译…", service.name, true);
         try {
-            const result = await translateText(service, text, settings.translationTargetLang);
+            const result = await translateText(service, text, targetLang);
             if (seq !== this.translationSeq) return;
             this.translationCache.set(cacheKey, result.text);
             this.showTranslationPopup(text, result.text, result.service, false);
@@ -3148,7 +3175,7 @@ export class PdfReader {
         const rect = this.selectionRect;
         const head = document.createElement("div");
         head.className = "pz-translation-head";
-        head.innerHTML = `<strong>翻译</strong><span>${escapeHtml(serviceName)} · ${escapeHtml(settings.translationTargetLang)}</span>`;
+        head.innerHTML = `<strong>翻译</strong><span>${escapeHtml(serviceName)} · ${escapeHtml(effectiveTargetLang(settings, "selection"))}</span>`;
         const close = document.createElement("button");
         close.className = "pz-translation-close";
         close.textContent = "×";
@@ -3984,29 +4011,30 @@ export class PdfReader {
             hud.setProgress(progress, "正在识别公式/文本…");
         }, 1200);
         try {
-            const server = await ensureOcrServer(settings);
-            if (!server.ok) throw new Error(server.error || "OCR 服务不可用");
             hud.setProgress(20, "正在上传选区并识别…");
-            const result = await recognizeImage(settings, selection.blob, {
+            const outcome = await recognizeWithFallback(settings, selection.blob, {
                 mode: settings.ocrDefaultMode,
                 source: "pdf-region",
             });
+            const result = outcome.result;
             if (!result.items.length && !result.markdown.trim()) throw new Error("OCR 没有返回内容");
             window.clearInterval(timer);
             hud.complete("OCR 识别完成");
-            this.showOcrPreview(result, selection);
+            this.showOcrPreview(result, selection, outcome.engine, outcome.attempts);
         } catch (error: any) {
             window.clearInterval(timer);
             hud.fail(String(error?.message || error || "OCR 识别失败"));
         }
     }
 
-    private showOcrPreview(result: OcrResult, selection: RectSelection): void {
+    private showOcrPreview(result: OcrResult, selection: RectSelection, engine?: string, attempts?: OcrAttempt[]): void {
         openOcrResultDialog(this.host, result, {
             imageBlob: selection.blob,
             source: "pdf-region",
             attachmentId: this.data.attachmentId,
             page: selection.page,
+            engine: (engine as any) || undefined,
+            attempts,
             insertionTarget: this.insertionTarget,
         });
     }

@@ -1,5 +1,18 @@
 export type PdfSourceKind = "local" | "zotero";
 
+/** Local OCR sidecar engines. One directory hosts one service process. */
+export type OcrEngineId = "pix2text" | "unimernet" | "texo";
+
+export interface OcrEngineConfig {
+    enabled: boolean;
+    /** Service directory (contains service.py / pz_ocr_server.py and optional runtime/). */
+    dir: string;
+    port: number;
+    autoStart: boolean;
+}
+
+export type OcrEngineMap = Record<OcrEngineId, OcrEngineConfig>;
+
 export interface ZoteroIdentity {
     libraryId: number;
     itemKey: string;
@@ -194,6 +207,8 @@ export interface Settings {
     translationAuto: boolean;
     translationMinChars: number;
     translationTargetLang: string;
+    /** Shared default target language for every translation entry point. */
+    translationDefaultTargetLang: string;
     translationShowOriginal: boolean;
     translationActiveServiceId: string;
     translationServices: TranslationServiceConfig[];
@@ -242,10 +257,26 @@ export interface Settings {
     ocrMfdStaticShape: string;
     ocrMfrContext: string;
     ocrTimeoutMs: number;
+    /** Legacy single-engine selector; kept for backwards compatibility. */
     ocrEngine: "pix2text" | "unimernet";
+    /** Legacy UniMERNet model directory (used by the shared legacy service). */
     unimernetPath: string;
     unimernetConfigPath: string;
     unimernetDevice: "auto" | "cpu" | "cuda";
+    /** Per-engine local sidecar configuration (one directory == one service). */
+    ocrEngines: OcrEngineMap;
+    /** Optional shared Python runtime used by every engine that has no bundled runtime. */
+    ocrSharedRuntimeDir: string;
+    /** Formula engine priority; defaults to Texo > UniMERNet > Pix2Text. */
+    ocrFormulaOrder: OcrEngineId[];
+    /** Engine used for text / mixed recognition. */
+    ocrTextEngine: OcrEngineId;
+    /** Formula preview renderer inside the OCR result dialog. */
+    ocrPreviewRenderer: "katex" | "mathlive";
+    /** Copy the recognized LaTeX to the clipboard as soon as recognition finishes. */
+    ocrAutoCopy: boolean;
+    /** Copy/insert flavour: raw LaTeX, wrappers ($...$, $$...$$, \(...\), \[...\], align, equation) or converted Typst/MathML. */
+    ocrAutoCopyFormat: "latex" | "typst" | "mathml" | "inline" | "display" | "paren" | "bracket" | "align" | "equation";
     noteTemplateActiveId: string;
     noteTemplateNotebookId: string;
     noteTemplateFolder: string;
@@ -396,13 +427,14 @@ export interface TemplateNoteLink {
     blocks?: TemplateNoteBlock[];
 }
 
-export type MatrixColumnType = "text" | "longtext" | "number" | "rating" | "select" | "multiselect" | "date" | "checkbox";
+export type MatrixColumnType = "text" | "longtext" | "number" | "rating" | "select" | "multiselect" | "date" | "checkbox" | "url" | "relation" | "formula";
 
 export interface MatrixColumn {
     id: string;
     name: string;
     type: MatrixColumnType;
     options?: string[];
+    formula?: string;
     width?: number;
     visible: boolean;
     system: boolean;
@@ -418,6 +450,55 @@ export interface MatrixRow {
     lastZoteroSyncAt?: number;
 }
 
+export type MatrixViewKind = "table" | "kanban" | "canvas";
+
+export type MatrixCanvasNodeKind = "row" | "pdf" | "note" | "text" | "tag" | "group" | "image";
+
+export interface MatrixCanvasNode {
+    id: string;
+    kind: MatrixCanvasNodeKind;
+    rowId?: string;
+    docId?: string;
+    blockId?: string;
+    attachmentId?: string;
+    thumbnailPath?: string;
+    thumbnail?: string;
+    text?: string;
+    x: number;
+    y: number;
+    width?: number;
+    height?: number;
+    color?: string;
+    collapsed?: boolean;
+}
+
+export type MatrixEdgeKind = "citation" | "contrast" | "method" | "conclusion" | "data" | "other" | "custom";
+
+export interface MatrixCanvasEdge {
+    id: string;
+    from: string;
+    to: string;
+    kind: MatrixEdgeKind;
+    label?: string;
+    directed: boolean;
+    auto?: boolean;
+}
+
+export interface MatrixCanvasState {
+    nodes: MatrixCanvasNode[];
+    edges: MatrixCanvasEdge[];
+    zoom?: number;
+    panX?: number;
+    panY?: number;
+}
+
+export interface MatrixFilterCondition {
+    id: string;
+    columnId: string;
+    operator: "contains" | "equals" | "not-empty" | "gt" | "lt";
+    value: string;
+}
+
 export interface MatrixView {
     id: string;
     name: string;
@@ -425,6 +506,17 @@ export interface MatrixView {
     sortColumn: string;
     sortDirection: "asc" | "desc";
     groupColumn?: string;
+    filterColumn?: string;
+    filterOperator?: "contains" | "equals" | "not-empty" | "gt" | "lt";
+    filterValue?: string;
+    filters?: MatrixFilterCondition[];
+    filterLogic?: "and" | "or";
+    kind?: MatrixViewKind;
+    groupColumns?: string[];
+    kanbanMode?: "field" | "custom";
+    customColumns?: string[];
+    customColumnByRow?: Record<string, string>;
+    canvas?: MatrixCanvasState;
 }
 
 export interface MatrixProject {
@@ -434,6 +526,8 @@ export interface MatrixProject {
     columns: MatrixColumn[];
     rows: MatrixRow[];
     views?: MatrixView[];
+    schemaVersion?: number;
+    schemaReviewed?: boolean;
     createdAt: number;
     updatedAt: number;
 }
