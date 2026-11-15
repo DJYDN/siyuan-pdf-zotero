@@ -2,7 +2,7 @@ import {getActiveTab, getAllEditor, getAllTabs, openTab} from "siyuan";
 import type PdfZoteroPlugin from "./index";
 import {insertAnnotationNote} from "./notes";
 import {requireNode} from "./runtime";
-import {e2eSleep as sleep} from "./e2e-utils";
+import {e2eFixturePath, e2eSleep as sleep} from "./e2e-utils";
 
 async function waitFor<T>(fn: () => T | Promise<T>, timeoutMs = 15000, interval = 120): Promise<T> {
     const start = Date.now();
@@ -135,6 +135,7 @@ export interface P1E2EReport {
     at: string;
     steps: Array<{name: string; at: string; data?: any}>;
     error?: string;
+    resources?: {docIds: string[]; attachmentIds: string[]; bookIds: string[]};
 }
 
 export async function runP1E2E(
@@ -167,12 +168,13 @@ export async function runP1E2E(
             markdown: "P1 E2E before\n\nP1 INSERT HERE\n\nP1 E2E after\n",
         });
         const docTitle = docPath.split("/").pop() || "p1-e2e";
+        report.resources = {docIds: [docId], attachmentIds: [], bookIds: []};
         step("doc-created", {docId, docTitle});
         void openTab({app: plugin.app, doc: {id: docId}, openNewTab: true, position: "right"});
         const editor = await waitFor(() => getAllEditor().find(item => item.protyle.block.rootID === docId), 15000);
         step("editor-opened", {rootID: editor.protyle.block.rootID});
 
-        const sourcePdf = "test-fixtures/navigation.pdf";
+        const sourcePdf = e2eFixturePath("navigation.pdf");
         const uniquePdf = sourcePdf.replace(/\.pdf$/i, `-p1-${Date.now()}.pdf`);
         const fsNode = requireNode("fs");
         fsNode.copyFileSync(sourcePdf, uniquePdf);
@@ -195,6 +197,10 @@ export async function runP1E2E(
         const attachment = await plugin.importLocalPath(uniquePdf);
         if (!attachment) {
             throw new Error("failed to import navigation.pdf");
+        }
+        if (report.resources) {
+            report.resources.attachmentIds.push(attachment.id);
+            report.resources.bookIds.push(attachment.bookId);
         }
         step("pdf-imported", {attachmentId: attachment.id, path: attachment.path});
         await plugin.openAttachmentAsync(attachment, 1);

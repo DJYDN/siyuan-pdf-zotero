@@ -57,6 +57,11 @@ export function defaultState(): PersistedState {
         screenshotRegions: {},
         recentAttachmentIds: [],
         translationOutputs: {},
+        ocrHistory: [],
+        matrixProjects: [],
+        matrixActiveProjectId: "",
+        noteTemplates: [],
+        templateNotes: {},
         pinnedZoteroKeys: [],
         qaConversations: {},
         qaThreads: {},
@@ -118,6 +123,32 @@ export function defaultState(): PersistedState {
             doc2xIgnoreTypes: [],
             doc2xContextual: false,
             translationOutputDir: "",
+            ocrServerPath: "",
+            ocrPort: 8891,
+            ocrAutoStart: true,
+            ocrStartCommand: "",
+            ocrLanguages: ["zh", "en"],
+            ocrDefaultMode: "auto",
+            ocrFormulaFormat: "inline",
+            ocrDefaultAction: "insert",
+            ocrHistoryLimit: 50,
+            ocrPreview: true,
+            ocrDevice: "cpu",
+            ocrEnableTable: false,
+            ocrEnableSpellChecker: true,
+            ocrMfdModel: "mfd-1.5",
+            ocrMfrModel: "mfr-1.5",
+            ocrMfdStaticShape: "",
+            ocrMfrContext: "",
+            ocrTimeoutMs: 120000,
+            ocrEngine: "pix2text",
+            unimernetPath: "",
+            unimernetConfigPath: "",
+            unimernetDevice: "auto",
+            noteTemplateActiveId: "",
+            noteTemplateNotebookId: "",
+            noteTemplateFolder: "",
+            noteTitlePattern: "{{year}}-{{firstAuthor}}-{{shortTitle}}",
             qaTitle: "PDF 问答",
             qaModelId: "",
             qaContextPages: 2,
@@ -224,6 +255,24 @@ export class Store {
         await this.writeBackup(this.state);
     }
 
+    /**
+     * Drop local books that no attachment references any more.
+     *
+     * Each E2E run imports a fresh fixture copy, and the cleanup removes that
+     * attachment, which used to leave the sibling book record behind forever.
+     * Zotero-sourced books are kept so cached metadata survives file moves.
+     */
+    async pruneOrphanBooks(): Promise<number> {
+        const used = new Set(Object.values(this.state.attachments).map(attachment => attachment.bookId));
+        const orphans = Object.entries(this.state.books)
+            .filter(([id, book]) => !used.has(id) && book.source === "local")
+            .map(([id]) => id);
+        for (const id of orphans) {
+            delete this.state.books[id];
+        }
+        return orphans.length;
+    }
+
     private migrate(raw: Partial<PersistedState>): PersistedState {
         const base = defaultState();
         const settings = {...base.settings, ...(raw.settings || {})};
@@ -256,6 +305,11 @@ export class Store {
             screenshotRegions: raw.screenshotRegions || {},
             recentAttachmentIds: Array.isArray(raw.recentAttachmentIds) ? raw.recentAttachmentIds : [],
             translationOutputs: raw.translationOutputs && typeof raw.translationOutputs === "object" ? raw.translationOutputs : {},
+            ocrHistory: Array.isArray(raw.ocrHistory) ? raw.ocrHistory : [],
+            matrixProjects: Array.isArray(raw.matrixProjects) ? raw.matrixProjects : [],
+            matrixActiveProjectId: typeof raw.matrixActiveProjectId === "string" ? raw.matrixActiveProjectId : "",
+            noteTemplates: Array.isArray(raw.noteTemplates) ? raw.noteTemplates : [],
+            templateNotes: raw.templateNotes && typeof raw.templateNotes === "object" ? raw.templateNotes : {},
             pinnedZoteroKeys: Array.isArray(raw.pinnedZoteroKeys) ? raw.pinnedZoteroKeys : [],
             qaConversations: raw.qaConversations && typeof raw.qaConversations === "object" ? raw.qaConversations : {},
             qaThreads: migrateQaThreads(raw),
@@ -284,7 +338,10 @@ export class Store {
         // Serialize writes so a fast sequence of selections cannot persist an older snapshot last.
         this.saving = this.saving.then(async () => {
             try {
-                const result: any = await this.plugin.saveData(STORAGE_KEY, this.state);
+                // The serialized copy is taken at write time, inside the queue, so a save
+                // requested before arriving changes cannot persist a pre-arrival snapshot.
+                const snapshot = JSON.parse(JSON.stringify(this.state));
+                const result: any = await this.plugin.saveData(STORAGE_KEY, snapshot);
                 if (result && typeof result.code === "number" && result.code !== 0) {
                     console.error("[pdf-zotero] saveData returned error", result);
                 }

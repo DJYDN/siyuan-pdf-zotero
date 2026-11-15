@@ -39,6 +39,9 @@ function run() {
         "--external:siyuan",
         "--outfile=" + path.join(dist, "index.js"),
         "--log-level=info",
+        // The renderer runs from the SiYuan install directory, so E2E code needs the
+        // repository root to locate test-fixtures without hardcoding it in source.
+        `--define:__PZ_REPO_ROOT__=${JSON.stringify(root.replaceAll("\\", "\\\\"))}`,
     ];
     console.log(`[build] ${esbuild} ${args.join(" ")}`);
     const result = spawnSync(esbuild, args, {stdio: "inherit", cwd: root});

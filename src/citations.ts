@@ -1,5 +1,5 @@
 import {getActiveEditor, getAllEditor, showMessage} from "siyuan";
-import {appendMarkdown, getBlockDom, querySql, updateBlockDom, updateBlockMarkdown} from "./api";
+import {apiPost, appendMarkdown, getBlockDom, querySql, updateBlockDom, updateBlockMarkdown} from "./api";
 import {formatCitationsAndBibliography} from "./citation/csl";
 import {newId} from "./storage";
 import {PLUGIN_NAME} from "./constants";
@@ -38,12 +38,32 @@ export interface DocCitationBlock {
 }
 
 export async function getDocCitationBlocks(docId: string): Promise<DocCitationBlock[]> {
-    const rows = await querySql<{id: string; markdown: string}>(`select id, sort, markdown from blocks where root_id = '${docId.replaceAll("'", "''")}' and markdown like '%siyuan://plugins/siyuan-pdf-zotero/citation?id=%' order by sort asc`);
-    return rows.map(row => ({
+    const escapedDoc = docId.replaceAll("'", "''");
+    const rows = await querySql<{id: string; markdown: string}>(`select id, sort, markdown from blocks where root_id = '${escapedDoc}' and markdown like '%siyuan://plugins/siyuan-pdf-zotero/citation?id=%' order by sort asc`);
+    const blocks = rows.map(row => ({
         blockId: row.id,
         markdown: row.markdown || "",
         citationIds: citationIdsInMarkdown(row.markdown || ""),
     }));
+    // The full-text index lags behind appendBlock/Protyle.insert, so fall back to a
+    // kramdown scan for links the index has not caught up with yet.
+    const seen = new Set(blocks.map(block => block.blockId));
+    const escapedHash = `%${encodeURIComponent("siyuan://plugins")}%`;
+    const candidates = await querySql<{id: string}>(`select id from blocks where root_id = '${escapedDoc}' and markdown like '${escapedHash}' order by sort asc`).catch((): any[] => []);
+    for (const row of candidates) {
+        if (seen.has(row.id)) {
+            continue;
+        }
+        const kramdown = await apiPost<any>("/block/getBlockKramdown", {id: row.id})
+            .then((data: any) => String(data?.kramdown || ""))
+            .catch((): string => "");
+        const ids = citationIdsInMarkdown(kramdown);
+        if (ids.length) {
+            blocks.push({blockId: row.id, markdown: kramdown, citationIds: ids});
+            seen.add(row.id);
+        }
+    }
+    return blocks;
 }
 
 export async function insertCitation(
@@ -52,7 +72,13 @@ export async function insertCitation(
     style: CitationStyle,
     options: CitationOptions = {},
 ): Promise<CitationRecord | null> {
-    const editor = getActiveEditor() || getAllEditor()[0];
+    // Default target: the document the user is looking at. The sidebar keeps a
+    // hidden editor instance whose activeElement is the body, so prefer the
+    // visible editor when one exists and fall back to the focused one otherwise.
+    const editors = getAllEditor();
+    const editor = editors.find(item => item?.protyle?.wysiwyg?.element?.offsetParent)
+        || getActiveEditor()
+        || editors[0];
     if (!editor) {
         showMessage("请先打开一个思源文档，再插入引文");
         return null;
@@ -86,19 +112,35 @@ export async function insertCitation(
         updatedAt: Date.now(),
     };
     const href = citationHref(record.id);
-    const before = new Set(Array.from(editor.protyle.wysiwyg?.element?.querySelectorAll?.("[data-node-id]") || [])
-        .map((element: HTMLElement) => element.dataset.nodeId));
-    editor.insert(`<span data-type="a" data-href="${href}" data-pz-citation="${record.id}">[?]</span>`, false, false);
-    await new Promise(resolve => setTimeout(resolve, 260));
-    const root = editor.protyle.wysiwyg?.element as HTMLElement | undefined;
+    // appendBlock is deterministic: Protyle.insert needs a focused editor, and the
+    // window may not own focus when the command runs from the dock or a shortcut.
+    const anchorBlockId = String(editor.protyle.block.id || "");
+    const markdown = `[[?]](${href})`;
     let blockId = "";
-    for (const element of Array.from(root?.querySelectorAll<HTMLElement>("[data-node-id]") || [])) {
-        if (element.dataset.nodeId && !before.has(element.dataset.nodeId)) {
-            blockId = element.dataset.nodeId;
-            break;
+    if (anchorBlockId) {
+        const inserted = await apiPost<any>("/block/appendBlock", {
+            parentID: anchorBlockId,
+            dataType: "markdown",
+            data: markdown,
+        }).catch((): any => null);
+        const ops = Array.isArray(inserted) ? inserted : [];
+        for (const transaction of ops) {
+            for (const op of transaction?.doOperations || []) {
+                if (op?.action === "insert" && op?.id) {
+                    blockId = String(op.id);
+                    break;
+                }
+            }
+            if (blockId) {
+                break;
+            }
         }
     }
     if (!blockId) {
+        // Fallback for editors without a concrete block id (e.g. an empty document).
+        editor.insert(`<span data-type="a" data-href="${href}" data-pz-citation="${record.id}">[?]</span>`, false, false);
+        await new Promise(resolve => setTimeout(resolve, 260));
+        const root = editor.protyle.wysiwyg?.element as HTMLElement | undefined;
         for (const element of Array.from(root?.querySelectorAll<HTMLElement>("[data-node-id]") || [])) {
             if (element.querySelector(`[data-href="${href}"]`)) {
                 blockId = element.dataset.nodeId || "";

@@ -223,6 +223,33 @@ export interface Settings {
     doc2xContextual: boolean;
     /** Empty means plugin data translations directory. */
     translationOutputDir: string;
+    /** Local Pix2Text OCR sidecar. */
+    ocrServerPath: string;
+    ocrPort: number;
+    ocrAutoStart: boolean;
+    ocrStartCommand: string;
+    ocrLanguages: string[];
+    ocrDefaultMode: "auto" | "formula" | "text";
+    ocrFormulaFormat: "inline" | "display";
+    ocrDefaultAction: "insert" | "replace" | "copy" | "append";
+    ocrHistoryLimit: number;
+    ocrPreview: boolean;
+    ocrDevice: "auto" | "cpu" | "cuda";
+    ocrEnableTable: boolean;
+    ocrEnableSpellChecker: boolean;
+    ocrMfdModel: string;
+    ocrMfrModel: string;
+    ocrMfdStaticShape: string;
+    ocrMfrContext: string;
+    ocrTimeoutMs: number;
+    ocrEngine: "pix2text" | "unimernet";
+    unimernetPath: string;
+    unimernetConfigPath: string;
+    unimernetDevice: "auto" | "cpu" | "cuda";
+    noteTemplateActiveId: string;
+    noteTemplateNotebookId: string;
+    noteTemplateFolder: string;
+    noteTitlePattern: string;
     /** PDF Q&A. */
     qaTitle: string;
     qaModelId: string;
@@ -275,6 +302,19 @@ export interface TranslationServiceConfig {
     baseURL: string;
     apiKey: string;
     model: string;
+}
+
+export interface OcrHistoryEntry {
+    id: string;
+    kind: "formula" | "text" | "mixed";
+    latex: string;
+    text: string;
+    markdown: string;
+    source: "pdf-region" | "clipboard";
+    attachmentId?: string;
+    page?: number;
+    favorite: boolean;
+    createdAt: number;
 }
 
 export interface TranslationOutput {
@@ -331,6 +371,73 @@ export interface ReaderSessionState {
     readerAttachmentIds: string[];
 }
 
+export interface NoteTemplate {
+    id: string;
+    name: string;
+    content: string;
+    builtin: boolean;
+    trusted: boolean;
+    createdAt: number;
+    updatedAt: number;
+}
+
+export interface TemplateNoteBlock {
+    id: string;
+    content: string;
+    markdown: string;
+}
+
+export interface TemplateNoteLink {
+    itemKey: string;
+    docId: string;
+    templateId: string;
+    updatedAt: number;
+    snapshot?: string;
+    blocks?: TemplateNoteBlock[];
+}
+
+export type MatrixColumnType = "text" | "longtext" | "number" | "rating" | "select" | "multiselect" | "date" | "checkbox";
+
+export interface MatrixColumn {
+    id: string;
+    name: string;
+    type: MatrixColumnType;
+    options?: string[];
+    width?: number;
+    visible: boolean;
+    system: boolean;
+    source: "zotero" | "custom" | "research";
+}
+
+export interface MatrixRow {
+    id: string;
+    libraryId: number;
+    itemKey: string;
+    values: Record<string, unknown>;
+    noteDocId?: string;
+    lastZoteroSyncAt?: number;
+}
+
+export interface MatrixView {
+    id: string;
+    name: string;
+    filter: string;
+    sortColumn: string;
+    sortDirection: "asc" | "desc";
+    groupColumn?: string;
+}
+
+export interface MatrixProject {
+    id: string;
+    name: string;
+    collectionKeys: string[];
+    columns: MatrixColumn[];
+    rows: MatrixRow[];
+    views?: MatrixView[];
+    createdAt: number;
+    updatedAt: number;
+}
+
 export interface PersistedState {
     version: number;
     books: Record<string, Book>;
@@ -341,6 +448,11 @@ export interface PersistedState {
     recentAttachmentIds: string[];
     zotero: ZoteroCache;
     translationOutputs: Record<string, TranslationOutput>;
+    ocrHistory: OcrHistoryEntry[];
+    matrixProjects: MatrixProject[];
+    matrixActiveProjectId: string;
+    noteTemplates: NoteTemplate[];
+    templateNotes: Record<string, TemplateNoteLink>;
     pinnedZoteroKeys: string[];
     qaConversations: Record<string, QaConversation>;
     qaThreads: Record<string, QaThread>;

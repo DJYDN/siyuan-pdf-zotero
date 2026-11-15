@@ -1,282 +1,196 @@
 # SiYuan PDF × Zotero
 
+![SiYuan PDF × Zotero](docs/readme-hero.png)
+
 [![SiYuan](https://img.shields.io/badge/SiYuan-3.8.7%2B-4f63d2)](https://b3log.org/siyuan/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-在思源笔记中直接阅读本地 PDF 或 Zotero PDF，并提供 PDF++ 风格的标注、摘录、双向链接、悬浮预览、Zotero 检索、结构化引文、AI 问答与翻译工作流。
+在思源笔记里完成 **PDF 阅读、PDF++ 风格标注、免费划词翻译、本地整篇 PDF 翻译、Zotero 引文、公式 OCR、文献矩阵和默认笔记模板**。
 
-> 本项目只使用思源公开插件 API。不会修改 `.sy` 文件、不会写入 Zotero 数据库，也不会修改原始 PDF。
+本地优先，不修改原始 PDF，不写入 Zotero 数据库。
 
-当前版本：**0.9.21**（更新记录见 [CHANGELOG.md](CHANGELOG.md)）
+当前版本：**0.9.56**
+
+> **翻译亮点**：划词翻译免费（Bing / MyMemory）；整篇 PDF 可在本地跑 PDF2zh；支持纯英文输出、中英文对照、译文历史和第三方翻译服务。
 
 ---
 
-## 功能
+## 下载
 
-### PDF 阅读
+| 包 | 用途 |
+|---|---|
+| `siyuan-pdf-zotero-0.9.56.zip` | 思源插件本体 · SHA-256 `E6C081C653E1C0C9C5BEABE472B37A8676A55D0A6FD2FA4231905DCDB7474D7F` |
+| `SiYuan-PDF2zh-Portable.zip` | PDF2zh 整篇翻译便携包 · SHA-256 `66AB82F8885796153EEC56CF81D536E43ADA5F1E27D3450D90838CBBC4C8D27E` |
+| `OCR-Service-Portable.zip` | 本地 OCR 便携包（Pix2Text + UniMERNet 适配） · SHA-256 `022DEDE663633C7556B19C04D1EE02873A83352B26AEB96A743C8A9C848BCFE7` |
 
-- 在思源标签页中打开本地 PDF；
-- 从 Zotero Local API 打开 PDF，或使用离线缓存；
-- 目录、页码跳转、前进/后退、缩放、适合宽度；
-- PDF 全文搜索、搜索结果定位；
-- 阅读位置记忆；
-- 多 PDF 标签页与会话恢复。
+每个包目录内都有独立 `README.md` 和 `SHA-256` 文件。
 
-### 标注与笔记
+---
 
+## 核心功能
+
+### PDF 阅读与标注
+
+- 在思源中打开本地 PDF 或 Zotero PDF；
+- PDF.js 渲染、目录、页码、前进/后退、缩放；
+- 全文搜索、阅读位置记忆、多 PDF 会话；
 - 文本选择、高亮、摘录；
-- 颜色选择、链接格式、显示文本格式；
-- 高亮内容插入思源笔记；
-- PDF 矩形区域截图并插入笔记；
-- 点击笔记中的标注链接回到 PDF 原位；
-- 标注反向定位到关联笔记块；
-- 悬浮预览：PDF 内链、标注卡片、笔记反链；
-- 可选的 PDF 内嵌标注写入（B 计划，默认关闭）。
+- 矩形选区截图并插入笔记；
+- PDF++ 风格区域链接：插入截图并复制区域链接；
+- 点击笔记回到 PDF 原位；
+- 悬浮预览：PDF 内链、标注卡片、反链。
+
+### 翻译：免费划词 + 本地整篇 + 第三方
+
+- **免费划词翻译**：内置 Bing Translator、MyMemory，无需 API Key；
+- **本地整篇 PDF 翻译**：PDF2zh 本地便携包，不修改原 PDF；
+- **纯英文输出**：PDF2zh 单语模式、Doc2X 纯译文 PDF；
+- **中英文对照输出**：PDF2zh 双语对照、Doc2X 双语排版 PDF；
+- **译文管理**：Dock 译文历史、打开译文/原文、打开输出目录、删除记录、清空记录；
+- **第三方翻译服务**：思源内置 AI、OpenAI 兼容、DeepL、Google、Bing、MyMemory、百度、有道、腾讯云、阿里云、Azure、彩云小译；
+- 划词翻译弹窗支持复制译文、写入标注、附带原文回跳；
+- 整篇翻译可配置输出目录、源语言、目标语言、单语/双语模式。
 
 ### Zotero 与引文
 
 - Zotero 7+ Local API；
-- 文献标题/作者/DOI 搜索；
-- 按 Collection 过滤；
-- 插入结构化引文链接；
-- 划词翻译支持 **Bing Translator / MyMemory** 免费服务；
-- 内置 **121 种 CSL 引用样式**，默认展示 5 种通用样式，可搜索选择更多；
-- citeproc-js 生成参考文献；
-- 引文编号按文档顺序刷新；
-- 引文编辑、删除、样式切换；
-- 参考文献自动生成与更新；
-- 阅读中 / 最近 / Zotero 条目右键支持“用所选条目创建参考文献”。
+- 标题/作者/DOI 搜索、Collection 过滤；
+- 结构化引文链接；
+- 内置 121 种 CSL 样式；
+- GB/T 7714、APA、IEEE 等引文与参考文献；
+- 引文编号按文档顺序刷新。
 
-### PDF AI 问答
+### 本地 OCR
 
-- 右侧独立 Q&A 面板，可停靠/浮动；
-- 浮动窗支持拖拽、拖角调整宽高，并记住尺寸；
-- 默认带选区/当前页及前后文；
-- 支持“问全文”检索；
-- 流式输出，不支持 SSE 的服务自动逐字渐显；
-- Markdown 标题、列表、表格、代码、KaTeX 公式渲染；
-- 回答可选中，右键复制、复制为引用、插入笔记、全选；
-- 回答可插入为带边框的 Q/A 块；
-- Q/A 块标题、圆角、边框、背景、字体、字号、Q/A 颜色可配置；
-- 一个 PDF 支持多个独立会话，会话可置顶、重命名、分享、多选、删除；
-- 右侧 prompt navigator 按轮次导航。
+- Pix2Text 公式/文本/混合识别；
+- UniMERNet 公式识别适配；
+- PDF 框选 OCR、剪贴板 OCR；
+- OCR 预览、编辑、公式格式切换；
+- 插入光标、复制、追加笔记、替换选区；
+- OCR 历史、收藏；
+- Pix2Text 高级选项：设备、超时、MFD/MFR 模型、静态尺寸、上下文、拼写检查、表格识别；
+- UniMERNet 目录、配置文件和设备配置。
 
-### 翻译
+### 文献矩阵
 
-- 选区翻译：多翻译服务适配；
-- 自动翻译、翻译弹窗、复制译文、写入标注；
-- 复制译文可选附带原文回跳链接；
-- 整篇 PDF 翻译：
-  - **Doc2X CLI**：解析/翻译为 Markdown 到笔记、保留排版 PDF、双语排版 PDF；
-  - **PDF2zh**：本地服务，可选便携包，支持实时进度、日志、中文字体与源语言设置；
-- 翻译历史可查看、右键管理、置顶文章、打开原文/译文、打开文件位置、删除记录；
-- 可配置翻译输出目录。
+- 一个研究项目一个矩阵；
+- 8 个系统列 + 12 个研究字段；
+- Zotero Collection 批量导入；
+- 行内编辑、筛选、排序、分组；
+- 保存视图、重命名、删除；
+- 批量编辑；
+- 行详情面板；
+- AI 填充：预览后应用；
+- 导出 CSV、导出 SiYuan 表格快照。
 
-### 条目右键菜单
+### 默认笔记模板
 
-阅读中 / 最近 / Zotero 条目右键支持：
-
-```text
-打开译文
-置顶 / 取消置顶
-打开文件所在位置
-用所选条目创建参考文献
-Doc2X ›
-打开 PDF
-```
-
-Doc2X 二级菜单：
-
-```text
-翻译PDF为Md到笔记
-解析PDF为Md到笔记
-保留排版翻译
-双语对照+排版翻译(Pro专属)
-────────────────────
-Doc2x:打开报错日志目录
-```
-
-Doc2X 后端使用官方 CLI，不会伪造网页/客户端专属设置。CLI 不支持的选项会在设置页明确说明。
-
-### 笔记 AI 自动化（可选）
-
-- 自动生成文章摘要、要点、关键词与分类；
-- 维护索引表；
-- 使用思源内置 AI provider 配置。
+- Better Notes 风格 `${...}` 与 `${{...}}$`；
+- `topItem` / `Zotero.Items` 兼容层；
+- 两个内置模板；
+- 模板管理器、导入 `.json/.html/.md/.txt`；
+- 目标笔记本选择；
+- 标题格式；
+- 模板笔记创建、映射；
+- 安全刷新：只更新未编辑的模板块，保留用户编辑。
 
 ---
 
-## 环境要求
+## 安装插件
 
-- SiYuan 3.8.7+ 桌面端；
-- Node.js 20+（仅从源码构建时需要）；
-- Windows 11 为当前主要验证环境，其他桌面平台未完整验证；
-- 可选：
-  - Zotero 7+，开启 Local API（默认端口 `23119`）；
-  - Doc2X CLI，用于整篇 PDF 解析/翻译；
-  - PDF2zh 本地服务，用于整篇 PDF 翻译。
+1. 安装思源桌面版 3.8.7+；
+2. 设置 → 集市 → 已下载 → 安装本地插件；
+3. 选择 `siyuan-pdf-zotero-0.9.56.zip`；
+4. 右侧栏启用 **PDF × Zotero** Dock。
 
----
+## OCR 安装
 
-## 构建与安装
+1. 解压 `OCR-Service-Portable.zip` 到固定位置；
+2. 插件设置 → OCR：
+   - 服务目录：解压目录；
+   - 引擎：Pix2Text 或 UniMERNet；
+   - UniMERNet 目录：选择 UniMERNet 解压目录；
+   - 检测 OCR 环境；
+3. 公式识别建议使用公式模式；
+4. 大型多行公式建议缩小框选范围；UniMERNet 需要单独模型包。
 
-```powershell
-npm install --ignore-scripts
+## PDF2zh 安装
 
-# 类型检查
-node node_modules\typescript\bin\tsc --noEmit
-
-# 单元/集成测试
-node scripts\build-tests.mjs
-node tests\run-all.mjs
-
-# 构建插件
-node scripts\build.mjs
-
-# 安装到思源工作空间
-node scripts\install-plugin.mjs --workspace "$env:USERPROFILE\SiYuan\Dataset"
-```
-
-也可以不传 `--workspace`，脚本默认使用 `%USERPROFILE%\SiYuan\Dataset`。
-
-### 生成可分发压缩包
-
-思源插件压缩包要求 `plugin.json`、`index.js` 位于压缩包根目录：
-
-```powershell
-Compress-Archive -Path dist\* -DestinationPath siyuan-pdf-zotero.zip
-```
-
-不要压缩整个 `dist` 文件夹本身，否则会多一层目录嵌套。
+1. 解压 `SiYuan-PDF2zh-Portable.zip`；
+2. 安装其中的 `plugin/siyuan-pdf-zotero-0.9.56.zip`；
+3. 设置 → PDF2zh：
+   - 地址：`http://127.0.0.1:8890`
+   - 服务目录：`...\pdf2zh-server`
+4. 打开 PDF，点击整篇翻译。
 
 ---
 
-## 使用
-
-### 打开 PDF
-
-1. 打开思源右侧栏中的 **PDF × Zotero** Dock；
-2. 点击“打开本地 PDF”；
-3. 或先刷新 Zotero，再从文献列表打开 PDF。
-
-### 标注与回跳
-
-1. 在 PDF 中选择文字；
-2. 使用浮动工具栏高亮、复制链接或插入笔记；
-3. 在笔记中点击标注链接可回到 PDF 原位置；
-4. 在 PDF 标注上右键可编辑、复制或查看反链。
-
-### AI 问答
-
-1. 打开 PDF 顶部工具栏的问答按钮；
-2. 输入问题；
-3. 默认使用选区/当前页作为上下文；
-4. 可切换“问全文”；
-5. 回答可复制，或插入为 Q/A 块；
-6. 顶部“会话”管理同一 PDF 的多段独立对话。
-
-### 设置
-
-在 Dock 设置页中可配置：
-
-- Zotero Local API 与阅读行为；
-- 选区翻译服务；
-- 整篇翻译服务（Doc2X / PDF2zh）；
-- Doc2X CLI 命令、鉴权、模型、术语表、字体策略、忽略类型；
-- PDF2zh 地址、服务目录、源/目标语言、输出模式；
-- AI 问答模型、上下文、历史、知识范围；
-- Q/A 块外观；
-- AI 自动化；
-- 默认 CSL 引用样式（5 个常用 + 可搜索 121 种）。
-
----
-
-## 数据与安全边界
-
-- 原始 PDF：只读；不写入、不重命名、不复制；
-- Zotero：仅调用 Local API；不直接打开/修改 `zotero.sqlite`；
-- 思源笔记：通过公开 API 写入；不直接修改 `.sy`；
-- 截图资源：通过 `/api/asset/upload` 写入 `assets/`；
-- AI/翻译密钥：保存在思源自身配置或本机 CLI 配置中，不写入仓库；
-- 本仓库不包含个人工作空间数据、PDF 样本、日志或发布构建产物。
-
-请勿在 issue 中粘贴完整 API Key、OAuth Token 或包含个人路径的日志。
-
----
-
-## 目录结构
+## 项目结构
 
 ```text
 src/
-  index.ts             插件入口、Dock/Tab、命令、回跳、预览
-  storage.ts           状态、备份、Q&A 会话、翻译历史
-  service.ts           本地 PDF 导入、Zotero 刷新
-  notes.ts             标注链接插入笔记
-  citations.ts         CSL 引文与参考文献
-  citation/            CSL/citeproc 适配、样式目录
-  pdf/                 PDF.js 加载、渲染、搜索、内链
-  qa/                  Q&A Markdown/KaTeX 渲染与块样式
-  translation/         选区翻译、Doc2X、PDF2zh
-  ui/                  Dock、Reader、引文对话框、预览、HUD
-styles/                121 种 CSL 样式与 locale
-scripts/               构建、测试、安装脚本
-tests/                 单元与集成测试
-docs/                  安装/使用/配置说明
+  index.ts            插件入口、命令、Dock
+  ui/reader.ts        PDF 阅读器、标注、OCR、翻译
+  ui/dock.ts          Dock 与设置
+  ocr/                OCR 客户端、服务、历史
+  matrix/             矩阵模型
+  template/           模板引擎、笔记创建
+  translation/        翻译服务
+  pdf/                PDF.js 封装
+ocr-server/
+  pz_ocr_server.py    本地 OCR HTTP 服务
+  README-UNIMERNET.md UniMERNet 接入说明
+scripts/              构建、测试、打包
+tests/                Node 单元/集成测试
 ```
 
----
-
-## 测试
+## 构建与测试
 
 ```powershell
-# 可选：重新生成不含第三方论文内容的合成 PDF fixture
-node scripts\make-sample-fixture.mjs
-
+node node_modules\typescript\bin\tsc --noEmit
 node scripts\build-tests.mjs
 node tests\run-all.mjs
+
+node scripts\build.mjs
+node scripts\install-plugin.mjs --workspace "C:\Users\Asus\SiYuan\Dataset"
 ```
 
-当前基础测试：**33/33 通过**，TypeScript 0 errors。
+当前验证结果：
 
-桌面端 E2E 脚本位于 `tests/e2e/`，需要本机 SiYuan 实例与 API Token；不属于默认测试流程。
+```text
+TypeScript：0 errors
+Node tests：35/35 pass
+插件版本：0.9.56
+```
 
----
+## 安全边界
+
+- 不修改原始 PDF；
+- 不修改 `.sy` 文件；
+- 不打开或写入 `zotero.sqlite`；
+- 只使用思源公开 API 和 Zotero Local API；
+- OCR/翻译服务只在本机运行。
 
 ## 已知限制
 
-- Windows 桌面端为主要验证环境；
-- 全量渲染所有 PDF 页面，超大 PDF 未做完整懒加载；
-- AI 问答历史本地保存，不跨设备同步；
-- Zotero 完全离线时仅能使用已缓存附件；
-- PDF2zh 依赖本地服务，机器翻译质量与网络稳定性有关；
-- Doc2X 需要用户自己的账号与 CLI 登录；网页/客户端专属的多格式输出选项 CLI 不一定支持；
-- 不是通用 PDF 编辑器，不修改原始 PDF；
-- 引文样式提供 121 种内置 CSL，暂未提供任意 CSL 文件导入 UI。
+- 大型多行公式（`aligned` / `cases`）仍可能出现识别错误，需要人工校对；
+- UniMERNet 真实模型包尚未完成端到端验收；
+- Ethereal Style 完整字段尚未实现；
+- 模板直接执行受信任的本地 JS，请只使用可信模板；
+- PDF2zh 依赖网络翻译服务。
 
----
+## 版本与发布
 
-## 技术栈
-
-- SiYuan Plugin API；
-- TypeScript + esbuild；
-- PDF.js；
-- citeproc-js + CSL；
-- KaTeX；
-- Zotero Local API。
-
----
-
-## License
-
-MIT。见 [LICENSE](LICENSE)。
-
-CSL 样式来自 [citation-style-language/styles](https://github.com/citation-style-language/styles)，按 CC BY-SA 3.0 分发，详见 [styles/README.md](styles/README.md)。
+- 最新版本：`0.9.56`
+- 发布标签说明见 [`RELEASE_TAGS.md`](RELEASE_TAGS.md)
+- 详细变更见 [`CHANGELOG.md`](CHANGELOG.md)
 
 ## 致谢
 
-- [SiYuan](https://github.com/siyuan-note/siyuan)
-- [PDF.js](https://github.com/mozilla/pdf.js)
+- [SiYuan](https://b3log.org/siyuan/)
+- [PDF.js](https://mozilla.github.io/pdf.js/)
+- [Pix2Text](https://github.com/breezedeus/Pix2Text)
+- [UniMERNet](https://github.com/opendatalab/UniMERNet)
+- [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate)
 - [citeproc-js](https://github.com/Juris-M/citeproc-js)
-- [KaTeX](https://github.com/KaTeX/KaTeX)
-- [Zotero](https://www.zotero.org/)

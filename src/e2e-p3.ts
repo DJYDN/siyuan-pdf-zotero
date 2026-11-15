@@ -1,5 +1,5 @@
 import type PdfZoteroPlugin from "./index";
-import {e2eSleep as sleep} from "./e2e-utils";
+import {e2eFixturePath, e2eSleep as sleep} from "./e2e-utils";
 
 async function api(path: string, payload: Record<string, any> = {}): Promise<any> {
     const token = String((window as any).siyuan?.config?.api?.token || "");
@@ -23,6 +23,7 @@ export interface P3E2EReport {
     at: string;
     steps: Array<{name: string; at: string; data?: any}>;
     error?: string;
+    resources?: {docIds: string[]; attachmentIds: string[]; bookIds: string[]};
 }
 
 export async function runP3E2E(plugin: PdfZoteroPlugin, onProgress?: (report: P3E2EReport) => Promise<void>): Promise<P3E2EReport> {
@@ -32,8 +33,9 @@ export async function runP3E2E(plugin: PdfZoteroPlugin, onProgress?: (report: P3
         void onProgress?.(JSON.parse(JSON.stringify(report)));
     };
     try {
-        const samplePath = "test-fixtures/sample-paper.pdf";
+        const samplePath = e2eFixturePath("sample-paper.pdf");
         const attachment = await plugin.importLocalPath(samplePath);
+        report.resources = {docIds: [], attachmentIds: [attachment?.id || ""].filter(Boolean), bookIds: [attachment?.bookId || ""].filter(Boolean)};
         if (!attachment) {
             throw new Error("could not import sample PDF");
         }

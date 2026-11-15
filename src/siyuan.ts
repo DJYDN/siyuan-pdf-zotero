@@ -2,6 +2,8 @@ import {getActiveEditor, getAllEditor} from "siyuan";
 import {showMessage} from "siyuan";
 import {imageHtml, linkedImageMarkdown, normalizeAssetPath} from "./asset-path";
 import type {NoteInsertionTarget} from "./host";
+import {recordAssetSafe} from "./asset-journal";
+import {deleteBlock, insertBlockAfter} from "./api";
 
 export interface InsertedImage {
     blockId: string;
@@ -33,7 +35,10 @@ export async function uploadPngAsset(blob: Blob, baseName: string): Promise<stri
         throw new Error("资源上传成功但内核没有返回路径");
     }
     // Accept both `/assets/x.png`, `assets/x.png` and legacy `data/assets/x.png`.
-    return normalizeAssetPath(String(rawPath));
+    const normalized = normalizeAssetPath(String(rawPath));
+    // Journal plugin-created assets so maintenance can find them after notes change.
+    recordAssetSafe(normalized);
+    return normalized;
 }
 
 export function insertHtmlAtCursor(html: string, isBlock = false): boolean {
@@ -99,6 +104,72 @@ export async function insertMarkdownAtCursor(
     // dropping the user's translation.
     editor.insert(markdown.replace(/\^/g, ""), false, false);
     return "";
+}
+
+/** Delete a plugin-generated asset through the kernel; ignores already-missing files. */
+export async function removeAsset(assetPath: string): Promise<boolean> {
+    const normalized = normalizeAssetPath(assetPath);
+    const response = await fetch("/api/asset/removeAsset", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token() ? {Authorization: `Token ${token()}`} : {}),
+        },
+        body: JSON.stringify({path: normalized}),
+    });
+    const json = await response.json().catch((): any => ({code: -1}));
+    return json.code === 0;
+}
+
+export async function replaceSelectionWithMarkdown(markdown: string, target: NoteInsertionTarget = {docId: ""}): Promise<boolean> {
+    const editor = (target.docId && getAllEditor().find(item => item.protyle.block.rootID === target.docId))
+        || getActiveEditor()
+        || getAllEditor()[0];
+    if (!editor) {
+        showMessage("请先打开一个思源笔记");
+        return false;
+    }
+    const wysiwyg = editor.protyle?.wysiwyg?.element as HTMLElement | undefined;
+    if (!wysiwyg) return false;
+    let range: Range | undefined = target.range;
+    if (target.trackedHandle) {
+        try {
+            const resolved = editor.protyle.resolveTrackedRange(target.trackedHandle as any);
+            if (resolved.status === "resolved") range = resolved.range;
+        } catch {
+            // fall back to the captured range
+        }
+    }
+    const rangeNode = range?.commonAncestorContainer;
+    const rangeElement = rangeNode ? (rangeNode.nodeType === Node.ELEMENT_NODE ? rangeNode as Element : rangeNode.parentElement) : null;
+    const capturedBlock = target.blockId ? wysiwyg.querySelector<HTMLElement>(`[data-node-id="${target.blockId}"]`) : null;
+    const mathBlock = rangeElement?.closest<HTMLElement>('[data-type="NodeMathBlock"]')
+        || capturedBlock?.closest<HTMLElement>('[data-type="NodeMathBlock"]')
+        || (capturedBlock?.matches('[data-type="NodeMathBlock"]') ? capturedBlock : null);
+    if (mathBlock?.dataset.nodeId) {
+        const inserted = await insertBlockAfter(mathBlock.dataset.nodeId, markdown);
+        if (inserted.ids.length) {
+            await deleteBlock(mathBlock.dataset.nodeId);
+            return true;
+        }
+        return false;
+    }
+    const selection = window.getSelection();
+    if (selection && range) {
+        try {
+            const node = range.commonAncestorContainer;
+            const owner = node.nodeType === Node.ELEMENT_NODE ? node : node.parentNode;
+            if (node.isConnected && owner && wysiwyg.contains(owner)) {
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+        } catch {
+            // use the current editor selection
+        }
+    }
+    wysiwyg.focus({preventScroll: true});
+    editor.insert(markdown, false, false);
+    return true;
 }
 
 export async function insertImageAtCursor(assetPath: string, alt = "PDF 区域截图", target: NoteInsertionTarget = {docId: ""}, sourceHref = "", sourceText = ""): Promise<InsertedImage | null> {

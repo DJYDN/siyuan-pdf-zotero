@@ -7,6 +7,11 @@ import {TRANSLATION_SERVICE_TYPES, defaultTranslationServices} from "../translat
 import {TRANSLATION_TARGETS} from "../translation/service";
 import {checkPdf2zhEnvironment, ensurePdf2zhServer, translationOutputDir} from "../translation/pdf2zh";
 import {checkDoc2xEnvironment} from "../translation/doc2x";
+import {checkOcrEnvironment, ensureOcrServer} from "../ocr/service";
+import {openOcrHistory} from "./ocr-history";
+import {openMatrix} from "./matrix-dialog";
+import {openTemplateManager} from "./template-manager";
+import {createNoteFromTemplate} from "../template/notes";
 import {syncTranslationHistory} from "../translation/history";
 import {openDoc2xErrorLogDir, runDoc2xMarkdownAction, runDoc2xPdfAction, type Doc2xTarget} from "./doc2x-actions";
 import {applyQaBlockTheme} from "../qa/theme";
@@ -329,6 +334,9 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
   <button data-act="open-local">打开本地 PDF</button>
   <button data-view="zotero">查找文献</button>
   <button data-act="insert-citation">插入引文</button>
+  <button data-act="ocr-clipboard" title="识别剪贴板中的图片">OCR 剪贴板</button>
+      <button data-act="open-matrix" title="打开文献矩阵">文献矩阵</button>
+      <button data-act="open-template-manager" title="管理默认笔记模板">笔记模板</button>
 </div>
 ${tabs}
 ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? recentView : dockFilter.view === "translations" ? translationsView : zoteroView}`;
@@ -370,6 +378,12 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
                 for (const output of translationOutputs) host.store.removeTranslationOutput(output.id);
                 void host.store.save();
                 host.refreshDock();
+            } else if (action === "open-template-manager") {
+                openTemplateManager(host);
+            } else if (action === "open-matrix") {
+                openMatrix(host);
+            } else if (action === "ocr-clipboard") {
+                host.ocrClipboardImage();
             } else if (action === "insert-citation") {
                 host.openCitationDialog();
             } else if (action === "settings") {
@@ -440,6 +454,7 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
                 }},
                 {label: "打开文件所在位置", action: () => revealPath(pathForZotero(itemKey)), disabled: !pathForZotero(itemKey)},
                 {label: "用所选条目创建参考文献", action: () => host.openCitationDialog(undefined, [itemKey]), disabled: !host.store.state.zotero.items.some(item => item.key === itemKey)},
+                {label: "用模板创建笔记", action: () => createNoteFromTemplate(host, itemKey), disabled: !host.store.state.zotero.items.some(item => item.key === itemKey)},
                 {label: "Doc2X", children: doc2xMenuItems(doc2xTargetForZotero(itemKey))},
                 ...(attachment ? [{label: "打开 PDF", action: () => host.openAttachment(attachment)}] : []),
             ]);
@@ -458,6 +473,7 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
             }},
             {label: "打开文件所在位置", action: () => revealPath(attachment.path)},
             {label: "用所选条目创建参考文献", action: () => host.openCitationDialog(undefined, [itemKey]), disabled: !itemKey},
+            {label: "用模板创建笔记", action: () => itemKey ? createNoteFromTemplate(host, itemKey) : undefined, disabled: !itemKey},
             {label: "Doc2X", children: doc2xMenuItems(doc2xTargetForAttachment(attachment))},
         ]);
     };
@@ -481,6 +497,7 @@ export function openSettings(host: PluginHost): void {
       <button data-settings-tab="qa">PDF 问答</button>
       <button data-settings-tab="whole">整篇翻译</button>
       <button data-settings-tab="doc2x">Doc2X</button>
+      <button data-settings-tab="ocr">OCR</button>
       <button data-settings-tab="pdf2zh">PDF2zh</button>
       <button data-settings-tab="automation">AI 自动化</button>
     </nav>
@@ -752,6 +769,69 @@ export function openSettings(host: PluginHost): void {
   <button class="b3-button b3-button--outline" data-act="doc2x-check" style="margin-bottom:6px">检测 Doc2X 环境 / 刷新模型</button>
   <div data-role="doc2x-env" class="pz-muted" style="font-size:12px;line-height:1.6;margin-bottom:8px"></div>
   </section>
+  <section class="pz-settings-page" data-settings-page="ocr">
+  <div class="pz-muted" style="margin-bottom:8px">本地 Pix2Text 服务；选择服务目录后插件可自动启动。当前首版支持 PDF 框选与剪贴板图片的公式/文本识别。</div>
+  <div class="fn__flex" style="gap:8px;margin-bottom:8px">
+    <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>识别引擎</span><select class="b3-select fn__block" data-field="ocrEngine"><option value="pix2text" ${host.store.state.settings.ocrEngine==="pix2text"?"selected":""}>Pix2Text</option><option value="unimernet" ${host.store.state.settings.ocrEngine==="unimernet"?"selected":""}>UniMERNet</option></select></label>
+  </div>
+  <label class="fn__flex" style="flex-direction:column;gap:4px;margin-bottom:8px">
+    <span>UniMERNet 目录（解压包目录，含 unimernet/ 与 models/）</span>
+    <div style="display:flex;gap:6px">
+      <input class="b3-text-field fn__block" data-field="unimernetPath" value="${escapeHtml(host.store.state.settings.unimernetPath)}" placeholder="选择 UniMERNet 解压目录" style="flex:1" />
+      <button class="b3-button b3-button--outline" data-act="unimernet-pick-dir" style="flex:0 0 auto">选择目录</button>
+    </div>
+  </label>
+
+  <label class="fn__flex" style="flex-direction:column;gap:4px;margin-bottom:8px">
+    <span>OCR 服务目录</span>
+    <div style="display:flex;gap:6px">
+      <input class="b3-text-field fn__block" data-field="ocrServerPath" value="${escapeHtml(host.store.state.settings.ocrServerPath)}" placeholder="包含 runtime/python.exe 与 pz_ocr_server.py 的目录" style="flex:1" />
+      <button class="b3-button b3-button--outline" data-act="ocr-pick-dir" style="flex:0 0 auto">选择目录</button>
+    </div>
+  </label>
+  <div class="fn__flex" style="gap:8px;margin-bottom:8px">
+    <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>端口</span><input class="b3-text-field fn__block" data-field="ocrPort" value="${host.store.state.settings.ocrPort}" /></label>
+    <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>历史条数</span><input class="b3-text-field fn__block" data-field="ocrHistoryLimit" value="${host.store.state.settings.ocrHistoryLimit}" /></label>
+  </div>
+  <label class="fn__flex" style="flex-direction:column;gap:4px;margin-bottom:8px">
+    <span>启动命令（可选；留空使用 runtime/python.exe pz_ocr_server.py 端口）</span>
+    <input class="b3-text-field fn__block" data-field="ocrStartCommand" value="${escapeHtml(host.store.state.settings.ocrStartCommand)}" placeholder="可选" />
+  </label>
+  <div class="fn__flex" style="gap:8px;margin-bottom:8px">
+    <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>默认模式</span><select class="b3-select fn__block" data-field="ocrDefaultMode"><option value="auto" ${host.store.state.settings.ocrDefaultMode==="auto"?"selected":""}>自动</option><option value="formula" ${host.store.state.settings.ocrDefaultMode==="formula"?"selected":""}>公式</option><option value="text" ${host.store.state.settings.ocrDefaultMode==="text"?"selected":""}>文本</option></select></label>
+    <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>公式默认格式</span><select class="b3-select fn__block" data-field="ocrFormulaFormat"><option value="inline" ${host.store.state.settings.ocrFormulaFormat==="inline"?"selected":""}>行内 $...$</option><option value="display" ${host.store.state.settings.ocrFormulaFormat==="display"?"selected":""}>独立 $...$</option></select></label>
+  </div>
+  <div class="fn__flex" style="gap:8px;margin-bottom:8px">
+    <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>默认后置动作</span><select class="b3-select fn__block" data-field="ocrDefaultAction"><option value="insert" ${host.store.state.settings.ocrDefaultAction==="insert"?"selected":""}>插入光标</option><option value="replace" ${host.store.state.settings.ocrDefaultAction==="replace"?"selected":""}>替换选区</option><option value="copy" ${host.store.state.settings.ocrDefaultAction==="copy"?"selected":""}>复制</option><option value="append" ${host.store.state.settings.ocrDefaultAction==="append"?"selected":""}>追加笔记</option></select></label>
+    <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>识别语言</span><div style="display:flex;gap:10px;padding-top:4px"><label><input type="checkbox" data-ocr-lang="zh" ${host.store.state.settings.ocrLanguages?.includes("zh")?"checked":""}/> 中文</label><label><input type="checkbox" data-ocr-lang="en" ${host.store.state.settings.ocrLanguages?.includes("en")?"checked":""}/> 英文</label></div></label>
+  </div>
+  <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><input type="checkbox" data-field="ocrAutoStart" ${host.store.state.settings.ocrAutoStart?"checked":""}/> 自动启动 OCR 服务</label>
+  <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><input type="checkbox" data-field="ocrPreview" ${host.store.state.settings.ocrPreview?"checked":""}/> 识别后先预览编辑</label>
+  <details class="pz-ocr-advanced" style="margin:8px 0 10px">
+    <summary>Pix2Text 高级选项</summary>
+    <div class="fn__flex" style="gap:8px;margin:8px 0">
+      <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>识别设备</span><select class="b3-select fn__block" data-field="ocrDevice"><option value="cpu" ${host.store.state.settings.ocrDevice==="cpu"?"selected":""}>CPU</option><option value="cuda" ${host.store.state.settings.ocrDevice==="cuda"?"selected":""}>CUDA</option><option value="auto" ${host.store.state.settings.ocrDevice==="auto"?"selected":""}>自动</option></select></label>
+      <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>超时（毫秒）</span><input class="b3-text-field fn__block" type="number" data-field="ocrTimeoutMs" value="${host.store.state.settings.ocrTimeoutMs}" /></label>
+    </div>
+    <div class="fn__flex" style="gap:8px;margin-bottom:8px">
+      <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>MFD 检测模型</span><input class="b3-text-field fn__block" data-field="ocrMfdModel" value="${escapeHtml(host.store.state.settings.ocrMfdModel)}" /></label>
+      <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>MFR 识别模型</span><input class="b3-text-field fn__block" data-field="ocrMfrModel" value="${escapeHtml(host.store.state.settings.ocrMfrModel)}" /></label>
+    </div>
+    <div class="fn__flex" style="gap:8px;margin-bottom:8px">
+      <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>MFD 静态尺寸（可选）</span><input class="b3-text-field fn__block" data-field="ocrMfdStaticShape" value="${escapeHtml(host.store.state.settings.ocrMfdStaticShape)}" placeholder="例如 768 或 768x1024" /></label>
+      <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>MFR 上下文（可选）</span><input class="b3-text-field fn__block" data-field="ocrMfrContext" value="${escapeHtml(host.store.state.settings.ocrMfrContext)}" placeholder="公式识别上下文" /></label>
+    </div>
+    <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><input type="checkbox" data-field="ocrEnableSpellChecker" ${host.store.state.settings.ocrEnableSpellChecker?"checked":""}/> 启用英文拼写检查</label>
+    <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><input type="checkbox" data-field="ocrEnableTable" ${host.store.state.settings.ocrEnableTable?"checked":""}/> 启用表格识别</label>
+    <div class="fn__flex" style="gap:8px;margin-bottom:8px">
+      <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>UniMERNet 配置文件（可选）</span><input class="b3-text-field fn__block" data-field="unimernetConfigPath" value="${escapeHtml(host.store.state.settings.unimernetConfigPath)}" placeholder="默认使用目录下 configs/demo.yaml" /></label>
+      <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>UniMERNet 设备</span><select class="b3-select fn__block" data-field="unimernetDevice"><option value="auto" ${host.store.state.settings.unimernetDevice==="auto"?"selected":""}>自动</option><option value="cpu" ${host.store.state.settings.unimernetDevice==="cpu"?"selected":""}>CPU</option><option value="cuda" ${host.store.state.settings.unimernetDevice==="cuda"?"selected":""}>CUDA</option></select></label>
+    </div>
+    <div class="pz-muted" style="font-size:11px">修改模型/设备后需要重启 OCR 服务；常用模型为 mfd-1.5、mfr-1.5。</div>
+  </details>
+  <div class="fn__flex" style="gap:6px;margin-bottom:6px"><button class="b3-button b3-button--outline" data-act="ocr-check">检测 OCR 环境</button><button class="b3-button b3-button--outline" data-act="ocr-history">OCR 历史</button></div>
+  <div data-role="ocr-env" class="pz-muted" style="font-size:12px;line-height:1.6;margin-bottom:8px"></div>
+  </section>
   <section class="pz-settings-page" data-settings-page="pdf2zh">
   <div class="pz-muted" style="margin-bottom:8px">PDF2zh 设置（本地 Server）</div>
   <label class="fn__flex" style="flex-direction:column;gap:4px;margin-bottom:8px">
@@ -941,6 +1021,43 @@ export function openSettings(host: PluginHost): void {
         const selected = await pickDirectory();
         if (selected) translationOutputDirInput.value = selected;
     });
+    const ocrServerPath = dialog.element.querySelector<HTMLInputElement>('[data-field="ocrServerPath"]')!;
+    const ocrPort = dialog.element.querySelector<HTMLInputElement>('[data-field="ocrPort"]')!;
+    const ocrStartCommand = dialog.element.querySelector<HTMLInputElement>('[data-field="ocrStartCommand"]')!;
+    const ocrHistoryLimit = dialog.element.querySelector<HTMLInputElement>('[data-field="ocrHistoryLimit"]')!;
+    const ocrDefaultMode = dialog.element.querySelector<HTMLSelectElement>('[data-field="ocrDefaultMode"]')!;
+    const ocrFormulaFormat = dialog.element.querySelector<HTMLSelectElement>('[data-field="ocrFormulaFormat"]')!;
+    const ocrDefaultAction = dialog.element.querySelector<HTMLSelectElement>('[data-field="ocrDefaultAction"]')!;
+    const ocrAutoStart = dialog.element.querySelector<HTMLInputElement>('[data-field="ocrAutoStart"]')!;
+    const ocrPreview = dialog.element.querySelector<HTMLInputElement>('[data-field="ocrPreview"]')!;
+    const ocrDevice = dialog.element.querySelector<HTMLSelectElement>('[data-field="ocrDevice"]')!;
+    const ocrEngine = dialog.element.querySelector<HTMLSelectElement>('[data-field="ocrEngine"]')!;
+    const unimernetPath = dialog.element.querySelector<HTMLInputElement>('[data-field="unimernetPath"]')!;
+    const unimernetConfigPath = dialog.element.querySelector<HTMLInputElement>('[data-field="unimernetConfigPath"]')!;
+    const unimernetDevice = dialog.element.querySelector<HTMLSelectElement>('[data-field="unimernetDevice"]')!;
+    const ocrTimeoutMs = dialog.element.querySelector<HTMLInputElement>('[data-field="ocrTimeoutMs"]')!;
+    const ocrMfdModel = dialog.element.querySelector<HTMLInputElement>('[data-field="ocrMfdModel"]')!;
+    const ocrMfrModel = dialog.element.querySelector<HTMLInputElement>('[data-field="ocrMfrModel"]')!;
+    const ocrMfdStaticShape = dialog.element.querySelector<HTMLInputElement>('[data-field="ocrMfdStaticShape"]')!;
+    const ocrMfrContext = dialog.element.querySelector<HTMLInputElement>('[data-field="ocrMfrContext"]')!;
+    const ocrEnableSpellChecker = dialog.element.querySelector<HTMLInputElement>('[data-field="ocrEnableSpellChecker"]')!;
+    const ocrEnableTable = dialog.element.querySelector<HTMLInputElement>('[data-field="ocrEnableTable"]')!;
+    const ocrLangInputs = Array.from(dialog.element.querySelectorAll<HTMLInputElement>("[data-ocr-lang]"));
+    const ocrEnv = dialog.element.querySelector<HTMLElement>('[data-role="ocr-env"]')!;
+    dialog.element.querySelector('[data-act="ocr-pick-dir"]')?.addEventListener("click", async () => { const selected = await pickDirectory(); if(selected) ocrServerPath.value = selected; });
+    dialog.element.querySelector('[data-act="unimernet-pick-dir"]')?.addEventListener("click", async () => { const selected = await pickDirectory(); if(selected) unimernetPath.value = selected; });
+    dialog.element.querySelector('[data-act="ocr-history"]')?.addEventListener("click", () => openOcrHistory(host));
+    dialog.element.querySelector('[data-act="ocr-check"]')?.addEventListener("click", async () => {
+        ocrEnv.textContent = "检测中…";
+        const probe = {...host.store.state.settings, ocrServerPath: ocrServerPath.value.trim(), ocrPort: Number.parseInt(ocrPort.value, 10) || 8891, ocrAutoStart: ocrAutoStart.checked};
+        let result = await checkOcrEnvironment(probe);
+        if (!result.health?.ok && result.python && result.script) {
+            ocrEnv.textContent = "服务未运行，正在尝试启动…";
+            await ensureOcrServer(probe);
+            result = await checkOcrEnvironment(probe);
+        }
+        ocrEnv.innerHTML = result.checks.map(item => `<div>${item.ok ? "✓" : "✗"} ${escapeHtml(item.label)}：${escapeHtml(item.detail)}</div>`).join("");
+    });
     const doc2xCommand = dialog.element.querySelector<HTMLInputElement>('[data-field="doc2xCommand"]')!;
     const doc2xConfigured = dialog.element.querySelector<HTMLInputElement>('[data-field="doc2xConfigured"]')!;
     const doc2xAuthMode = dialog.element.querySelector<HTMLSelectElement>('[data-field="doc2xAuthMode"]')!;
@@ -1069,6 +1186,29 @@ export function openSettings(host: PluginHost): void {
             doc2xFontStrategy: doc2xFontStrategy.value === "page-optimal" ? "page-optimal" : "global-consistent",
             doc2xContextual: doc2xContextual.checked,
             translationOutputDir: translationOutputDirInput.value.trim(),
+            ocrServerPath: ocrServerPath.value.trim(),
+            ocrPort: Number.parseInt(ocrPort.value, 10) || 8891,
+            ocrAutoStart: ocrAutoStart.checked,
+            ocrStartCommand: ocrStartCommand.value.trim(),
+            ocrLanguages: ocrLangInputs.filter(input => input.checked).map(input => input.dataset.ocrLang || "").filter(Boolean),
+            ocrDefaultMode: ocrDefaultMode.value === "formula" || ocrDefaultMode.value === "text" ? ocrDefaultMode.value : "auto",
+            ocrFormulaFormat: ocrFormulaFormat.value === "display" ? "display" : "inline",
+            ocrDefaultAction: ocrDefaultAction.value === "replace" || ocrDefaultAction.value === "copy" || ocrDefaultAction.value === "append" ? ocrDefaultAction.value : "insert",
+            ocrHistoryLimit: Math.max(1, Math.min(500, Number.parseInt(ocrHistoryLimit.value, 10) || 50)),
+            ocrPreview: ocrPreview.checked,
+            ocrEngine: ocrEngine.value === "unimernet" ? "unimernet" : "pix2text",
+            unimernetPath: unimernetPath.value.trim(),
+            unimernetConfigPath: unimernetConfigPath.value.trim(),
+            unimernetDevice: unimernetDevice.value === "cuda" || unimernetDevice.value === "cpu" ? unimernetDevice.value : "auto",
+            ocrDevice: ocrDevice.value === "cuda" || ocrDevice.value === "auto" ? ocrDevice.value : "cpu",
+            ocrEnableTable: ocrEnableTable.checked,
+            ocrEnableSpellChecker: ocrEnableSpellChecker.checked,
+            ocrMfdModel: ocrMfdModel.value.trim() || "mfd-1.5",
+            ocrMfrModel: ocrMfrModel.value.trim() || "mfr-1.5",
+            ocrMfdStaticShape: ocrMfdStaticShape.value.trim(),
+            ocrMfrContext: ocrMfrContext.value.trim(),
+            ocrTimeoutMs: Math.max(1000, Math.min(600000, Number.parseInt(ocrTimeoutMs.value, 10) || 120000)),
+
             doc2xFontColor: doc2xFontColor.checked,
             doc2xIgnoreTypes: doc2xIgnoreInputs.filter(input => input.checked).map(input => input.dataset.doc2xIgnore || "").filter(Boolean),
         });

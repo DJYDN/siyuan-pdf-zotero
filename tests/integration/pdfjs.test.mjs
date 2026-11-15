@@ -1,23 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import path from "node:path";
-import {pathToFileURL} from "node:url";
-import {fileURLToPath} from "node:url";
+import {fixtureDir, nodeGetDocument} from "./pdf-test-utils.mjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const fixture = path.join(root, "test-fixtures", "sample-paper.pdf");
-const fonts = pathToFileURL(path.join(root, "node_modules", "pdfjs-dist", "standard_fonts")).href + "/";
+const fixture = path.join(fixtureDir, "sample-paper.pdf");
 
 test("PDF.js loads the fixture, extracts selectable text and page geometry", async () => {
     // The legacy build is the supported Node.js build and avoids browser-only V8 helpers.
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    const data = new Uint8Array(fs.readFileSync(fixture));
-    const loadingTask = pdfjs.getDocument({
-        data,
-        standardFontDataUrl: fonts,
-        useWorkerFetch: false,
-    });
+    const loadingTask = nodeGetDocument(pdfjs, fixture);
     const pdf = await loadingTask.promise;
     try {
         assert.equal(pdf.numPages, 2);

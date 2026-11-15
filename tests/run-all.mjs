@@ -6,6 +6,7 @@ import "./unit/asset-path.test.mjs";
 import "./unit/citation-mapper.test.mjs";
 import "./unit/store-backup.test.mjs";
 import "./unit/link-format.test.mjs";
+import "./unit/ocr.test.mjs";
 import "./integration/pdf-source.test.mjs";
 import "./integration/pdfjs.test.mjs";
 import "./integration/links.test.mjs";

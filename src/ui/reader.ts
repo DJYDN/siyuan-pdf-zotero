@@ -30,6 +30,9 @@ import {PreviewManager} from "./preview";
 import {ScreenshotTool} from "./screenshot";
 import {RectSelectTool, type RectSelection} from "./rect-select";
 import {Pdf2zhHud} from "./pdf2zh-hud";
+import {recognizeImage, type OcrResult} from "../ocr/client";
+import {openOcrResultDialog} from "./ocr-dialog";
+import {ensureOcrServer} from "../ocr/service";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 function qaSessionGroup(timestamp: number): string {
@@ -88,6 +91,7 @@ export class PdfReader {
     private translationPopup: HTMLElement | null = null;
     private translationAnchor: {page: number; x: number; y: number; w: number; h: number} | null = null;
     private translationTimer = 0;
+    private translationOutsideHandler: ((event: PointerEvent) => void) | null = null;
     private translationSeq = 0;
     private readonly translationCache = new Map<string, string>();
     private qaPanel: HTMLElement | null = null;
@@ -165,6 +169,7 @@ export class PdfReader {
     private preview = new PreviewManager();
     private screenshot: ScreenshotTool | null = null;
     private rectSelect: RectSelectTool | null = null;
+    private ocrRectSelect: RectSelectTool | null = null;
     private destroyed = false;
     private scrollRaf = 0;
     private savePositionTimer = 0;
@@ -301,7 +306,7 @@ export class PdfReader {
   <span class="pz-title" data-role="title">PDF</span>
   <span class="pz-compact-meta" data-role="compact-meta">p.1</span>
   <button data-act="outline" class="pz-tool-icon" title="目录" aria-label="目录"><svg viewBox="0 0 24 24"><path d="M4 6h2M4 12h2M4 18h2M9 6h11M9 12h11M9 18h11"/></svg></button>
-  <button data-act="screenshot" class="pz-tool-icon" title="截图并插入笔记" aria-label="截图并插入笔记"><svg viewBox="0 0 24 24"><path d="M4 8V5h3M17 5h3v3M20 16v3h-3M7 19H4v-3M8 9h8v6H8z"/></svg></button>
+  <button data-act="ocr" class="pz-tool-icon" title="框选区域 OCR 识别公式/文字" aria-label="框选区域 OCR 识别"><svg viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M9 9h6v6H9zM12 9v6"/></svg></button>
   <button data-act="pdf2zh" class="pz-tool-icon" title="整篇 PDF 翻译" aria-label="整篇 PDF 翻译"><svg viewBox="0 0 24 24"><path d="M4 5h10M9 5v14M4 19h10M16 8h4M18 6v4M16 16h4M18 14v4"/></svg></button>
   <button data-act="qa" class="pz-tool-icon" title="PDF AI 问答" aria-label="PDF AI 问答"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4zM8 9h8M8 12h5"/></svg></button>
   <button data-act="panel" class="pz-tool-icon" title="标注、搜索与反链" aria-label="标注、搜索与反链"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM9 5v14"/></svg></button>
@@ -310,7 +315,7 @@ export class PdfReader {
     ${HIGHLIGHT_COLORS.map(color => `<button class="pz-format-color${color.id === "none" ? " is-none" : ""}${this.selectedColor === color.id ? " is-active" : ""}" data-format-color="${color.id}" title="${color.label}" style="--pz-color:${color.value}"></button>`).join("")}
     <button data-act="format-link" class="pz-format-trigger" title="Link copy format" aria-label="Link copy format"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.2 1.2M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.2-1.2"/></svg><span class="pz-format-state"></span><span class="pz-format-caret">⌄</span></button>
     <button data-act="format-display" class="pz-format-trigger" title="Display text format" aria-label="Display text format"><svg viewBox="0 0 24 24"><path d="M5 5h14M12 5v14M8 19h8"/></svg><span class="pz-format-state"></span><span class="pz-format-caret">⌄</span></button>
-    <button data-act="rect-link" class="pz-tool-icon pz-rect-btn" title="框选区域并插入/复制" aria-label="框选区域并插入或复制"><svg viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/></svg></button>
+    <button data-act="rect-link" class="pz-tool-icon pz-rect-btn" title="框选区域并插入/复制（截图 + PDF 区域链接）" aria-label="框选区域并插入或复制"><svg viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M8 9h8v6H8z"/></svg></button>
     <button data-act="write-file" class="pz-tool-icon pz-write-file" title="将高亮写入 PDF 文件" aria-label="将高亮写入 PDF 文件"><svg viewBox="0 0 24 24"><path d="M4 20l4.5-1 10-10-3.5-3.5-10 10zM13.5 7l3.5 3.5"/></svg></button>
   </div>
 </div>
@@ -586,6 +591,10 @@ export class PdfReader {
             void this.onRectSelection(selection);
         });
         this.rectSelect.bind();
+        this.ocrRectSelect = new RectSelectTool(this.pagesElement, selection => {
+            void this.onOcrSelection(selection);
+        });
+        this.ocrRectSelect.bind();
         window.addEventListener("resize", this.positionTranslationPopup);
         this.pagesElement.addEventListener("scroll", this.positionTranslationPopup, {passive: true});
     }
@@ -966,7 +975,23 @@ export class PdfReader {
             this.screenshot?.setActive(false);
             this.updateScreenshotButton();
             this.rectSelect?.setActive(true);
-            showMessage("拖拽 PDF 矩形区域，复制该区域的嵌入链接", 3000);
+            showMessage("拖拽 PDF 矩形区域：插入截图并复制区域链接", 3000);
+        } else if (action === "ocr") {
+            this.screenshot?.setActive(false);
+            this.rectSelect?.setActive(false);
+            this.insertionTarget = this.host.captureNoteInsertionTarget();
+            this.element.dataset.pzInsertionTarget = JSON.stringify({
+                docId: this.insertionTarget.docId,
+                blockId: this.insertionTarget.blockId || "",
+                textOffset: this.insertionTarget.textOffset ?? -1,
+                tracked: Boolean(this.insertionTarget.trackedHandle),
+            });
+            if (!this.host.store.state.settings.ocrServerPath?.trim()) {
+                showMessage("请先在设置 → OCR 中选择本地服务目录", 4000, "error");
+                return;
+            }
+            this.ocrRectSelect?.setActive(true);
+            showMessage("拖拽框选公式或文本区域，松开后识别", 3000);
         } else if (action === "pdf2zh") {
             void this.translateWholePdf();
         } else if (action === "qa") {
@@ -1866,7 +1891,7 @@ export class PdfReader {
         }
         this.selection = anchor;
         this.selectionRect = range.getBoundingClientRect();
-        this.closeTranslationPopup();
+        this.closeTranslationPopup(true);
         const rects = anchor.rects;
         this.translationAnchor = {
             page: anchor.page,
@@ -1879,13 +1904,24 @@ export class PdfReader {
         this.scheduleAutoTranslation();
     }
 
-    private closeTranslationPopup(): void {
+    private closeTranslationPopup(keepSelection = false): void {
         window.clearTimeout(this.translationTimer);
         this.translationTimer = 0;
         this.translationSeq++;
+        if (this.translationOutsideHandler) {
+            document.removeEventListener("pointerdown", this.translationOutsideHandler, true);
+            this.translationOutsideHandler = null;
+        }
         this.translationPopup?.remove();
         this.translationPopup = null;
         this.translationAnchor = null;
+        if (!keepSelection) {
+            this.selection = null;
+            this.selectionRect = null;
+            this.clearUserSelection();
+            this.hideFloat();
+            window.getSelection()?.removeAllRanges();
+        }
     }
 
     private readonly positionTranslationPopup = (): void => {
@@ -3173,10 +3209,12 @@ export class PdfReader {
         this.positionTranslationPopup();
         requestAnimationFrame(() => this.positionTranslationPopup());
         window.setTimeout(() => {
-            document.addEventListener("pointerdown", event => {
+            if (this.translationPopup !== popup) return;
+            this.translationOutsideHandler = (event: PointerEvent): void => {
                 if (this.translationPopup !== popup) return;
                 if (!popup.contains(event.target as Node)) this.closeTranslationPopup();
-            }, {once: true, capture: true});
+            };
+            document.addEventListener("pointerdown", this.translationOutsideHandler, {capture: true});
         }, 0);
     }
 
@@ -3930,6 +3968,47 @@ export class PdfReader {
             w: rect.w * width,
             h: rect.h * height,
         };
+    }
+
+    private async onOcrSelection(selection: RectSelection): Promise<void> {
+        if (!selection.blob) {
+            showMessage("没有获取到框选图像", 3000, "error");
+            return;
+        }
+        const settings = this.host.store.state.settings;
+        const hud = new Pdf2zhHud("OCR");
+        let progress = 5;
+        hud.setProgress(progress, "正在检查本地 OCR 服务…");
+        const timer = window.setInterval((): void => {
+            progress = Math.min(90, progress + 3);
+            hud.setProgress(progress, "正在识别公式/文本…");
+        }, 1200);
+        try {
+            const server = await ensureOcrServer(settings);
+            if (!server.ok) throw new Error(server.error || "OCR 服务不可用");
+            hud.setProgress(20, "正在上传选区并识别…");
+            const result = await recognizeImage(settings, selection.blob, {
+                mode: settings.ocrDefaultMode,
+                source: "pdf-region",
+            });
+            if (!result.items.length && !result.markdown.trim()) throw new Error("OCR 没有返回内容");
+            window.clearInterval(timer);
+            hud.complete("OCR 识别完成");
+            this.showOcrPreview(result, selection);
+        } catch (error: any) {
+            window.clearInterval(timer);
+            hud.fail(String(error?.message || error || "OCR 识别失败"));
+        }
+    }
+
+    private showOcrPreview(result: OcrResult, selection: RectSelection): void {
+        openOcrResultDialog(this.host, result, {
+            imageBlob: selection.blob,
+            source: "pdf-region",
+            attachmentId: this.data.attachmentId,
+            page: selection.page,
+            insertionTarget: this.insertionTarget,
+        });
     }
 
     private async onRectSelection(selection: RectSelection): Promise<void> {

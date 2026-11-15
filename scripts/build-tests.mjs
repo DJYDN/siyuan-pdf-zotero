@@ -18,7 +18,7 @@ if (!esbuild) {
     process.exit(1);
 }
 
-const entries = ["anchor", "runtime", "asset-path", "storage", "link-format", "pdf/source", "pdf/links", "citation/mapper"];
+const entries = ["anchor", "runtime", "asset-path", "storage", "link-format", "pdf/source", "pdf/links", "citation/mapper", "ocr/client"];
 for (const entry of entries) {
     const out = path.join(outDir, entry.replace("/", "-") + ".mjs");
     const args = [
@@ -29,6 +29,7 @@ for (const entry of entries) {
         "--target=node22",
         "--outfile=" + out,
         "--log-level=warning",
+        `--define:__PZ_REPO_ROOT__=${JSON.stringify(root.replaceAll("\\", "\\\\"))}`,
     ];
     const result = spawnSync(esbuild, args, {stdio: "inherit", cwd: root});
     if (result.error || result.status !== 0) {

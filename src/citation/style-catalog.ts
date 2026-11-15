@@ -136,3 +136,15 @@ export const POPULAR_CSL_STYLES = ["apa","ieee","modern-language-association","c
 export const CSL_STYLE_ALIASES: Record<string, string> = {
     gbt7714: "gb-t-7714-2015-numeric",
 };
+
+// gb-t-7714-2015-numeric is a compatibility preset, not a selectable catalog entry:
+// without it in the catalog the alias above is the single source of style metadata.
+if (!CSL_STYLE_CATALOG.some(item => item.id === "gb-t-7714-2015-numeric")) {
+    CSL_STYLE_CATALOG.push({
+        id: "gb-t-7714-2015-numeric",
+        file: "gb-t-7714-2015-numeric.csl",
+        label: "GB/T 7714-2015锛堥『搴忕紪鐮侊級",
+        title: "GB/T 7714-2015 顺序编码制",
+        numeric: true,
+    });
+}

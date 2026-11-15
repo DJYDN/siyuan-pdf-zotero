@@ -1,16 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import path from "node:path";
-import {fileURLToPath} from "node:url";
+import {fixtureDir, nodeGetDocument} from "./pdf-test-utils.mjs";
 import {getLinkBoxes, loadOutline} from "../../.test-build/pdf-links.mjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const fixture = path.join(root, "test-fixtures", "navigation.pdf");
+const fixture = path.join(fixtureDir, "navigation.pdf");
 
 test("loadOutline resolves LaTeX bookmarks to 1-based pages", async () => {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    const task = pdfjs.getDocument({data: new Uint8Array(fs.readFileSync(fixture))});
+    const task = nodeGetDocument(pdfjs, fixture);
     const pdf = await task.promise;
     try {
         const outline = await loadOutline(pdf);
@@ -25,7 +23,7 @@ test("loadOutline resolves LaTeX bookmarks to 1-based pages", async () => {
 
 test("getLinkBoxes converts PDF link rects and resolves internal destinations", async () => {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    const task = pdfjs.getDocument({data: new Uint8Array(fs.readFileSync(fixture))});
+    const task = nodeGetDocument(pdfjs, fixture);
     const pdf = await task.promise;
     try {
         let total = 0;

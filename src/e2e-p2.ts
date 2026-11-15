@@ -1,6 +1,6 @@
-import {getAllEditor, openTab} from "siyuan";
+import {getAllEditor, getAllTabs, openTab} from "siyuan";
 import type PdfZoteroPlugin from "./index";
-import {deleteCitation, insertCitation, refreshDocumentCitations, setDocumentCitationStyle, updateCitation} from "./citations";
+import {deleteCitation, getDocCitationBlocks, insertCitation, refreshDocumentCitations, setDocumentCitationStyle, updateCitation} from "./citations";
 import {e2eSleep as sleep} from "./e2e-utils";
 import {fileExists} from "./runtime";
 
@@ -38,6 +38,28 @@ async function api(path: string, payload: Record<string, any> = {}): Promise<any
     return json.data;
 }
 
+function activateTabByTitle(titlePart: string): boolean {
+    const tab = getAllTabs().find((item: any) => String(item.title || "").includes(titlePart));
+    if (!tab) {
+        return false;
+    }
+    try {
+        tab.parent.switchTab(tab.headElement, false);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function fullError(error: any): string {
+    const base = error?.message || String(error);
+    const stack = String(error?.stack || "")
+        .split("\n")
+        .slice(0, 8)
+        .join("\n");
+    return stack && stack !== base ? `${base}\n${stack}` : base;
+}
+
 async function docKramdown(docId: string): Promise<string> {
     const data = await api("/api/block/getBlockKramdown", {id: docId});
     return String(data?.kramdown || "");
@@ -64,6 +86,7 @@ export interface P2E2EReport {
     at: string;
     steps: Array<{name: string; at: string; data?: any}>;
     error?: string;
+    resources?: {docIds: string[]; attachmentIds: string[]; bookIds: string[]};
 }
 
 export async function runP2E2E(plugin: PdfZoteroPlugin, onProgress?: (report: P2E2EReport) => Promise<void>): Promise<P2E2EReport> {
@@ -96,12 +119,12 @@ export async function runP2E2E(plugin: PdfZoteroPlugin, onProgress?: (report: P2
             markdown: "这是一段用于 P2 引文测试的正文。\n",
         });
         const docTitle = docPath.split("/").pop() || "p2-e2e";
+        report.resources = {docIds: [docId], attachmentIds: [], bookIds: []};
         step("doc-created", {docId, docTitle});
         void openTab({app: plugin.app, doc: {id: docId}, openNewTab: true, position: "right"});
         const editor = await waitFor(() => getAllEditor().find(item => item.protyle.block.rootID === docId), 15000);
         step("editor-opened", {rootID: editor.protyle.block.rootID});
 
-        plugin.openCitationDialog();
         plugin.openCitationDialog();
         const dialog = await waitFor(() => document.querySelector<HTMLElement>(".pz-citation-dialog"), 5000);
         step("citation-dialog", {
@@ -114,8 +137,13 @@ export async function runP2E2E(plugin: PdfZoteroPlugin, onProgress?: (report: P2
         if (document.querySelectorAll(".pz-citation-dialog").length !== 1) {
             throw new Error("repeated citation commands opened stacked dialogs");
         }
-        dialog.closest<HTMLElement>(".b3-dialog")?.querySelector<HTMLElement>('[data-act="citation-cancel"]')?.click();
-        await waitFor(() => document.querySelectorAll(".pz-citation-dialog").length === 0, 3000);
+        const closeTarget = dialog.querySelector<HTMLElement>('[data-act="citation-cancel"]')
+            || dialog.closest<HTMLElement>(".b3-dialog")?.querySelector<HTMLElement>('[data-act="citation-cancel"]');
+        closeTarget?.click();
+        // A dialog that refuses to close must not block the rest of the phase.
+        await waitFor(() => document.querySelectorAll(".pz-citation-dialog").length === 0, 3000).catch((): any => undefined);
+        document.querySelectorAll<HTMLElement>(".pz-citation-dialog")
+            .forEach(el => el.closest<HTMLElement>(".b3-dialog")?.remove());
 
         const zoteroOffline = Boolean(plugin.store.state.zotero.lastError);
         const multiAttachmentItem = plugin.store.state.zotero.items.find(item => item.key === "B68RNBTV");
@@ -161,18 +189,37 @@ export async function runP2E2E(plugin: PdfZoteroPlugin, onProgress?: (report: P2
             });
         }
 
-        setCaretToEnd(editor);
+        // The test document was created invisibly while a previous document owned the
+        // visible tab. Activate it like a user would, so the editor becomes interactive.
+        activateTabByTitle(docTitle);
+        await sleep(500);
+        const activeEditor = await waitFor(
+            () => getAllEditor().find(item => item.protyle.block.rootID === docId && item.protyle.wysiwyg?.element?.offsetParent),
+            8000,
+        );
+        step("doc-activated", {rootID: activeEditor.protyle.block.rootID});
+        setCaretToEnd(activeEditor);
+        const {appendCitationMarkdownProbe, runCitationProbe} = await import("./e2e-probe");
+        const markdownProbe = await appendCitationMarkdownProbe();
+        step("markdown-probe", markdownProbe);
+        const probe = await runCitationProbe(plugin, markdownProbe);
+        step("citation-probe", probe);
+        setCaretToEnd(activeEditor);
         const c1 = await insertCitation(plugin.store, [first.key], "gbt7714", {locator: "12"});
         if (!c1) {
             throw new Error("insert first citation failed");
         }
         await sleep(700);
         let kramdown = await docKramdown(docId);
+        const firstCitations = await getDocCitationBlocks(docId).catch((): any[] => []);
         step("citation-1", {
             id: c1.id,
+            activeRootID: getAllEditor()[0]?.protyle.block.rootID || "",
+            expectedRootID: docId,
             visible: plugin.store.state.citations[c1.id]?.visibleHtml,
             hasHref: kramdown.includes("citation?id="),
             hasReferences: kramdown.includes("参考文献"),
+            sqlHitBlocks: firstCitations.length,
             sample: kramdown.slice(0, 600),
         });
 
@@ -298,8 +345,8 @@ export async function runP2E2E(plugin: PdfZoteroPlugin, onProgress?: (report: P2
         step("done");
         return report;
     } catch (error: any) {
-        report.error = error?.stack || error?.message || String(error);
-        step("error", {message: error?.message || String(error)});
+        report.error = fullError(error);
+        step("error", {message: error?.message || String(error), stack: String(error?.stack || "").slice(0, 2000)});
         return report;
     }
 }

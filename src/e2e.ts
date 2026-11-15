@@ -3,7 +3,7 @@ import {annotationHref} from "./anchor";
 import type PdfZoteroPlugin from "./index";
 import {insertAnnotationNote} from "./notes";
 import {requireNode} from "./runtime";
-import {e2eSleep as sleep} from "./e2e-utils";
+import {e2eFixturePath, e2eSleep as sleep} from "./e2e-utils";
 
 async function waitFor<T>(fn: () => T | Promise<T>, timeoutMs = 15000, interval = 120): Promise<T> {
     const start = Date.now();
@@ -98,7 +98,7 @@ function activateTabByTitle(titlePart: string): boolean {
     }
 }
 
-function selectTextOnPage(reader: HTMLElement, pageNumber: number): string {
+export function selectTextOnPage(reader: HTMLElement, pageNumber: number): string {
     const page = reader.querySelector<HTMLElement>(`.pz-page[data-page="${pageNumber}"]`);
     if (!page) {
         throw new Error(`page ${pageNumber} not rendered`);
@@ -130,6 +130,7 @@ export interface P0E2EReport {
     at: string;
     steps: Array<{name: string; at: string; data?: any}>;
     error?: string;
+    resources?: {docIds: string[]; attachmentIds: string[]; bookIds: string[]};
 }
 
 export async function runP0E2E(
@@ -164,13 +165,14 @@ export async function runP0E2E(
             markdown: "P0 E2E target document\n",
         });
         const docTitle = docPath.split("/").pop() || "p0-e2e";
+        report.resources = {docIds: [docId], attachmentIds: [], bookIds: []};
         step("doc-created", {docId, notebookId, docTitle});
         void openTab({app: plugin.app, doc: {id: docId}, openNewTab: true, position: "right"});
         const editor = await waitFor(() => getAllEditor().find(item => item.protyle.block.rootID === docId), 15000);
         step("editor-opened", {rootID: editor.protyle.block.rootID});
 
         const pdfPath = localStorage.getItem("pdf-zotero-e2e-pdf")
-            || "test-fixtures/sample-paper.pdf";
+            || e2eFixturePath("sample-paper.pdf");
         // Unique path/attachment per run: old reader tabs from prior runs must not shadow the new one.
         const uniquePath = pdfPath.replace(/\.pdf$/i, `-e2e-${Date.now()}.pdf`);
         const fs = requireNode("fs");
@@ -195,6 +197,10 @@ export async function runP0E2E(
         const attachment = await plugin.importLocalPath(uniquePath);
         if (!attachment) {
             throw new Error(`failed to import PDF: ${pdfPath}`);
+        }
+        if (report.resources) {
+            report.resources.attachmentIds.push(attachment.id);
+            report.resources.bookIds.push(attachment.bookId);
         }
         step("pdf-imported", {
             attachmentId: attachment.id,

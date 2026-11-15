@@ -287,7 +287,12 @@ async function translateBing(config: TranslationServiceConfig, text: string, tar
     if (response.status < 200 || response.status >= 300) {
         throw new Error(`Bing Translator HTTP ${response.status}: ${response.text.slice(0, 200)}`);
     }
-    const data = JSON.parse(response.text);
+    let data: any;
+    try {
+        data = JSON.parse(response.text);
+    } catch {
+        throw new Error("Bing Translator 返回空或非 JSON 响应（可能被限流/网络中断）");
+    }
     if (data?.statusCode) throw new Error(`Bing Translator: ${data.errorMessage || data.statusCode}`);
     const result = data?.[0]?.translations?.[0]?.text;
     if (!result) throw new Error("Bing Translator 没有返回译文");
@@ -440,12 +445,24 @@ export async function translateText(
     const value = String(text || "").trim();
     if (!value) throw new Error("没有可翻译的文本");
     let result = "";
+    let usedService = service.name || service.type;
     switch (service.type) {
         case "siyuan-ai": result = await translateSiyuanAI(service, value, targetLang); break;
         case "openai": result = await translateOpenAICompatible(service, value, targetLang); break;
         case "deepl": result = await translateDeepL(service, value, targetLang); break;
         case "google": result = await translateGoogle(service, value, targetLang); break;
-        case "bing": result = await translateBing(service, value, targetLang); break;
+        case "bing":
+            try {
+                result = await translateBing(service, value, targetLang);
+            } catch (bingError: any) {
+                try {
+                    result = await translateSiyuanAI({...service, type: "siyuan-ai"}, value, targetLang);
+                    usedService = "思源 AI（Bing 回退）";
+                } catch {
+                    throw bingError;
+                }
+            }
+            break;
         case "mymemory": result = await translateMyMemory(service, value, targetLang); break;
         case "baidu": result = await translateBaidu(service, value, targetLang); break;
         case "youdao": result = await translateYoudao(service, value, targetLang); break;
@@ -455,5 +472,5 @@ export async function translateText(
         case "caiyun": result = await translateCaiyun(service, value, targetLang); break;
         default: throw new Error(`不支持的翻译服务：${service.type}`);
     }
-    return {text: result, service: service.name || service.type};
+    return {text: result, service: usedService};
 }

@@ -28,10 +28,14 @@ export interface PluginHost {
 
     openZoteroItem(itemKey: string): Promise<void>;
 
+    openDoc(docId: string): void;
+
     /** Open the source document and focus the block that holds the note link. */
     openNoteBlock(docId: string, blockId: string): Promise<void>;
 
     openCitationDialog(citationId?: string, initialItemKeys?: string[]): void;
+
+    ocrClipboardImage(): void;
 
     /** Re-authorize a moved/deleted PDF without losing annotations or note links. */
     relinkAttachment(attachmentId: string): Promise<void>;

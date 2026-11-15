@@ -59,6 +59,11 @@ function insertedIds(operations: any): string[] {
     return ids;
 }
 
+export async function insertBlockAfter(previousID: string, markdown: string): Promise<InsertedBlockIds> {
+    const data = await apiPost("/block/insertBlock", {dataType: "markdown", data: markdown, previousID});
+    return {ids: insertedIds(data), transaction: data};
+}
+
 export async function appendMarkdown(parentID: string, markdown: string): Promise<InsertedBlockIds> {
     const data = await apiPost("/block/appendBlock", {dataType: "markdown", data: markdown, parentID});
     return {ids: insertedIds(data), transaction: data};
@@ -94,6 +99,18 @@ export async function checkBlockExist(id: string): Promise<boolean> {
 
 export async function removeDocByID(id: string): Promise<void> {
     await apiPost("/filetree/removeDocByID", {id});
+}
+
+export interface NotebookInfo {id: string; name: string; closed?: boolean;}
+
+export async function listNotebooks(): Promise<NotebookInfo[]> {
+    const data = await apiPost<any>("/notebook/lsNotebooks", {});
+    return Array.isArray(data?.notebooks) ? data.notebooks : [];
+}
+
+export async function getChildBlocks(id: string): Promise<any[]> {
+    const data = await apiPost<any>("/block/getChildBlocks", {id});
+    return Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
 }
 
 export async function getBlockKramdown(id: string): Promise<string> {

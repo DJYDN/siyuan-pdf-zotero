@@ -9,6 +9,7 @@ export class Pdf2zhHud {
     private readonly logs: string[] = [];
     private hideTimer = 0;
     private readonly provider: string;
+    private readonly isOcr: boolean;
     private readonly onOutsidePointerDown = (event: PointerEvent): void => {
         if (this.panel.hidden) return;
         if (this.root.contains(event.target as Node)) return;
@@ -17,16 +18,17 @@ export class Pdf2zhHud {
 
     constructor(provider = "PDF2zh") {
         this.provider = provider;
+        this.isOcr = provider === "OCR";
         this.root = document.createElement("div");
         this.root.className = "pz-pdf2zh-hud";
         this.root.dataset.state = "running";
         this.root.innerHTML = `
-  <button class="pz-pdf2zh-ring" type="button" title="点击查看 PDF2zh 详细进度">
+  <button class="pz-pdf2zh-ring" type="button" title="${this.isOcr ? "点击查看 OCR 进度" : "点击查看 PDF2zh 详细进度"}">
     <span data-role="label">0%</span>
   </button>
   <div class="pz-pdf2zh-panel" hidden>
     <div class="pz-pdf2zh-panel-head">
-      <strong data-role="title">${provider} 整篇翻译</strong>
+      <strong data-role="title">${this.isOcr ? "OCR 识别" : `${provider} 整篇翻译`}</strong>
       <button data-role="close" type="button" title="关闭">×</button>
     </div>
     <div class="pz-pdf2zh-panel-status" data-role="detail">准备中…</div>
@@ -94,7 +96,7 @@ export class Pdf2zhHud {
         this.root.dataset.state = "success";
         this.root.classList.remove("is-indeterminate");
         this.setProgress(100, message);
-        this.title.textContent = `${this.provider} 翻译完成`;
+        this.title.textContent = this.isOcr ? "OCR 识别完成" : `${this.provider} 翻译完成`;
         this.hideTimer = window.setTimeout(() => this.destroy(), 1800);
     }
 
@@ -102,7 +104,7 @@ export class Pdf2zhHud {
         this.root.dataset.state = "error";
         this.root.classList.remove("is-indeterminate");
         this.label.textContent = "!";
-        this.title.textContent = `${this.provider} 翻译失败`;
+        this.title.textContent = this.isOcr ? "OCR 识别失败" : `${this.provider} 翻译失败`;
         this.setStatus(message);
         this.panel.hidden = false;
     }

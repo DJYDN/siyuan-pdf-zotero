@@ -17,11 +17,43 @@ import {pickPdfFile} from "./pdf/source";
 import {pdfjsLib} from "./pdf/pdfjs";
 import {ZoteroClient} from "./zotero/client";
 import {syncTranslationHistory} from "./translation/history";
+import {readClipboardImage} from "./ocr/capture";
+import {recognizeImage} from "./ocr/client";
+import {ensureOcrServer} from "./ocr/service";
+import {openOcrResultDialog} from "./ui/ocr-dialog";
 import {applyQaBlockTheme, repairQaBlockAttributes} from "./qa/theme";
 import {NotebookAutomation} from "./automation/service";
 
 const ICON_ID = "iconPdfZotero";
 const STYLE_ID = "pdf-zotero-style";
+
+/**
+ * One-shot maintenance before a plugin reload.
+ *
+ * The kernel releases the workspace when the plugin unloads, so a journaled-asset
+ * sweep queued here runs while files are still accessible and survives the reload.
+ */
+const MAINTENANCE_KEY = "asset-sweep-requested";
+
+async function runQueuedAssetSweep(plugin: PdfZoteroPlugin): Promise<void> {
+    try {
+        const flag = await plugin.loadData(MAINTENANCE_KEY);
+        if (!flag?.run) {
+            return;
+        }
+        await plugin.removeData(MAINTENANCE_KEY).catch((): void => undefined);
+        const {sweepUnreferencedAssets, writeAssetJournal} = await import("./asset-journal");
+        const result = await sweepUnreferencedAssets();
+        await writeAssetJournal(result.skipped);
+        await plugin.saveData("asset-sweep-report", {
+            at: new Date().toISOString(),
+            removed: result.removed,
+            skipped: result.skipped,
+        });
+    } catch (error: any) {
+        console.warn("[pdf-zotero] asset sweep failed", error?.message || error);
+    }
+}
 
 export default class PdfZoteroPlugin extends Plugin implements PluginHost {
     store!: Store;
@@ -291,6 +323,7 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
         this.maybeRunP1E2E();
         this.maybeRunP2E2E();
         this.maybeRunP3E2E();
+        void runQueuedAssetSweep(this);
         this.maybeRunAutomationE2E();
     }
 
@@ -329,6 +362,26 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
         })();
     }
 
+    async removeGeneratedAsset(assetPath: string): Promise<void> {
+        const {removeAsset} = await import("./siyuan");
+        await removeAsset(assetPath);
+    }
+
+    private async cleanupE2EResources(report: any): Promise<void> {
+        const resources = report?.resources;
+        if (!resources) {
+            return;
+        }
+        const {cleanupE2EArtifacts} = await import("./e2e-cleanup");
+        report.cleanup = await cleanupE2EArtifacts(this as any, {
+            docIds: resources.docIds || [],
+            attachmentIds: resources.attachmentIds || [],
+            bookIds: resources.bookIds || [],
+            testPaths: ["test-fixtures/navigation-p1-", "test-fixtures/sample-paper-e2e-", "test-fixtures/sample-paper.pdf"],
+            closeReaderTabs: true,
+        });
+    }
+
     private async maybeRunP3E2E(): Promise<void> {
         let run = false;
         try {
@@ -353,6 +406,7 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
                 const report = await runP3E2E(this, async progress => {
                     await this.saveReport("p3-e2e-progress", progress);
                 });
+                await this.cleanupE2EResources(report).catch((): void => undefined);
                 await this.saveReport("p3-e2e-report", report);
             } catch (error: any) {
                 await this.saveReport("p3-e2e-report", {
@@ -388,6 +442,7 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
                 const report = await runP2E2E(this, async progress => {
                     await this.saveReport("p2-e2e-progress", progress);
                 });
+                await this.cleanupE2EResources(report).catch((): void => undefined);
                 await this.saveReport("p2-e2e-report", report);
             } catch (error: any) {
                 await this.saveReport("p2-e2e-report", {
@@ -425,6 +480,7 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
                 const report = await runP1E2E(this, async progress => {
                     await this.saveReport("p1-e2e-progress", progress);
                 });
+                await this.cleanupE2EResources(report).catch((): void => undefined);
                 await this.saveReport("p1-e2e-report", report);
             } catch (error: any) {
                 await this.saveReport("p1-e2e-report", {
@@ -762,6 +818,13 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
             },
         });
         this.addCommand({
+            langKey: "ocrClipboard",
+            langText: "OCR 识别剪贴板图片",
+            execute: () => {
+                this.ocrClipboardImage();
+            },
+        });
+        this.addCommand({
             langKey: "refreshZoteroCitations",
             langText: "刷新当前文档参考文献",
             execute: () => {
@@ -831,8 +894,39 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
         }, 700);
     };
 
+    ocrClipboardImage(): void {
+        void this.ocrClipboardImageInternal();
+    }
+
+    private async ocrClipboardImageInternal(): Promise<void> {
+        try {
+            const blob = await readClipboardImage();
+            const settings = this.store.state.settings;
+            if (!settings.ocrServerPath?.trim()) {
+                showMessage("请先在设置 → OCR 中选择本地服务目录", 4000, "error");
+                return;
+            }
+            const server = await ensureOcrServer(settings);
+            if (!server.ok) throw new Error(server.error || "OCR 服务不可用");
+            const result = await recognizeImage(settings, blob, {mode: settings.ocrDefaultMode, source: "clipboard"});
+            if (!result.items.length && !result.markdown.trim()) throw new Error("OCR 没有返回内容");
+            openOcrResultDialog(this, result, {
+                imageBlob: blob,
+                source: "clipboard",
+                insertionTarget: this.captureNoteInsertionTarget(),
+            });
+        } catch (error: any) {
+            showMessage(`OCR 失败：${error?.message || String(error)}`, 6000, "error");
+        }
+    }
+
     openSetting(): void {
         openSettings(this);
+    }
+
+    openDoc(docId: string): void {
+        if (!docId) return;
+        void openTab({app: this.app, doc: {id: docId}, openNewTab: true, position: "right"});
     }
 
     openCitationDialog(citationId?: string, initialItemKeys: string[] = []): void {
@@ -1617,6 +1711,7 @@ ${attachments.map(item => `<button class="pz-list-item" data-attachment-choice="
         const report = await runP0E2E(this, async progress => {
             await this.saveReport("p0-e2e-progress", progress);
         });
+        await this.cleanupE2EResources(report).catch((): void => undefined);
         await this.saveReport("p0-e2e-report", report);
     }
 }

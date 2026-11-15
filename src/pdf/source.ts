@@ -78,12 +78,48 @@ export interface LoadedPdfBytes {
     changed: boolean;
 }
 
+async function readKernelFile(path: string): Promise<Uint8Array | null> {
+    try {
+        const token = String((window as any).siyuan?.config?.api?.token || "");
+        const normalized = path.replaceAll("\\", "/");
+        const workspacePath = normalized.match(/\/data\/(.+)$/);
+        const candidates = Array.from(new Set([normalized, ...(workspacePath ? [`/data/${workspacePath[1]}`] : [])]));
+        for (const candidate of candidates) {
+            const response = await fetch("/api/file/getFile", {
+                method: "POST",
+                headers: {"Content-Type": "application/json", ...(token ? {Authorization: `Token ${token}`} : {})},
+                body: JSON.stringify({path: candidate}),
+            });
+            if (!response.ok) continue;
+            const bytes = new Uint8Array(await response.arrayBuffer());
+            if (bytes.length >= 5 && String.fromCharCode(...bytes.slice(0, 5)) === "%PDF-") return bytes;
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 export async function loadAttachmentBytes(attachment: PdfAttachment): Promise<LoadedPdfBytes> {
     if (!attachment.path) {
         throw new Error("该 PDF 没有可访问的本地路径，请重新选择原文件");
     }
     if (!fileExists(attachment.path)) {
-        throw new Error(`PDF 文件不存在或不可访问：${attachment.path}`);
+        const fallbackBytes = await readKernelFile(attachment.path);
+        if (!fallbackBytes) {
+            throw new Error(`PDF 文件不存在或不可访问：${attachment.path}`);
+        }
+        if (fallbackBytes.length < 5 || String.fromCharCode(...fallbackBytes.slice(0, 5)) !== "%PDF-") {
+            throw new Error("文件不是有效的 PDF（缺少 %PDF- 头）");
+        }
+        const fingerprint = sha256Hex(fallbackBytes);
+        return {
+            bytes: fallbackBytes,
+            fingerprint,
+            size: fallbackBytes.length,
+            mtimeMs: 0,
+            changed: Boolean(attachment.fingerprint && attachment.fingerprint !== fingerprint),
+        };
     }
     const stat = await readFileStat(attachment.path);
     const bytes = await readFileBytes(attachment.path);
