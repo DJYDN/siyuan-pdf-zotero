@@ -28,10 +28,6 @@
 
 ## 界面预览
 
-> 以下为按真实插件界面制作的**高保真示意图**（布局、按钮和交互与 0.9.58 一致，示例论文与路径为虚构数据）。
-
-![封面](docs/screenshots/cover.png)
-
 <details>
 <summary><b>Dock 面板与阅读入口</b></summary>
 
@@ -41,7 +37,7 @@
 </details>
 
 <details>
-<summary><b>笔记中的图片 / 高亮文本回跳 PDF</b>（含动图）</summary>
+<summary><b>笔记中的图片 / 高亮文本回跳 PDF</b></summary>
 
 ![图片回跳动图](docs/screenshots/backjump-image-demo.gif)
 
@@ -51,7 +47,7 @@
 </details>
 
 <details>
-<summary><b>免费划词翻译</b>（含动图）</summary>
+<summary><b>免费划词翻译</b></summary>
 
 ![划词翻译动图](docs/screenshots/translation-selection-demo.gif)
 
@@ -69,7 +65,7 @@
 </details>
 
 <details>
-<summary><b>免费公式识别</b>（含动图）</summary>
+<summary><b>免费公式识别</b></summary>
 
 ![OCR 插入动图](docs/screenshots/ocr-insert-demo.gif)
 
