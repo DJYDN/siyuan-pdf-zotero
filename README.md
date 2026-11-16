@@ -1,6 +1,6 @@
 # SiYuan PDF × Zotero
 
-![SiYuan PDF × Zotero](docs/readme-hero.png)
+![SiYuan PDF × Zotero](docs/screenshots/cover.png)
 
 [![SiYuan](https://img.shields.io/badge/SiYuan-3.8.7%2B-4f63d2)](https://b3log.org/siyuan/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6)](https://www.typescriptlang.org/)
@@ -26,18 +26,73 @@
 
 ---
 
-## 下载
+## 界面预览
 
-| 包 | 说明 | SHA-256 |
-|---|---|---|
-| `siyuan-pdf-zotero-0.9.58.zip` | 思源插件本体（5.6MB） | `AAD35C144C4C5BDCB1BF4CA642FA5F474BF2A3978576D328D0D0D16013D70009` |
-| `OCR-Texo-Portable.zip` | Texo 公式引擎独立包，自带运行时 + ONNX 模型（122MB 压缩 / 约 205MB 解压） | `F7B2FDE60DB1E51F8CD8C233D8D2BACCC9E0CD16E014F6396ED4B88E7BF5E56B` |
-| `OCR-Pix2Text-Portable.zip` | Pix2Text 独立包，公式/文本/混合，自带运行时与模型缓存（857.6MB 压缩 / 约 1.82GB 解压） | `AD9FBB5E0CD7C078883161C5D4E3E3E2146D79EF6A6572328009D893BAFFFFF1` |
-| `OCR-UniMERNet-Portable.zip` | UniMERNet 独立包，纯公式，transformers 推理（1.53GB 压缩 / 约 2.35GB 解压） | `F220A189A2C11FD97617F1D9EE1B968B9AEB65D939A04FCB01C693A2FE2A003A` |
-| `OCR-Service-Portable.zip` | 旧版共用服务（Pix2Text + UniMERNet 适配），向后兼容（1.49GB） | `022DEDE663633C7556B19C04D1EE02873A83352B26AEB96A743C8A9C848BCFE7` |
-| `SiYuan-PDF2zh-Portable.zip` | PDF2zh 整篇翻译便携包（432.6MB） | `66AB82F8885796153EEC56CF81D536E43ADA5F1E27D3450D90838CBBC4C8D27E` |
+> 以下为按真实插件界面制作的**高保真示意图**（布局、按钮和交互与 0.9.58 一致，示例论文与路径为虚构数据）。
 
-每个便携包目录内都有独立 `README.md` 和 `SHA-256` 校验文件。
+![封面](docs/screenshots/cover.png)
+
+<details>
+<summary><b>Dock 面板与阅读入口</b></summary>
+
+![Dock](docs/screenshots/dock.png)
+
+右侧 Dock 统一承载继续阅读、Zotero 文献、译文历史；PDF 工具栏提供 OCR、翻译、标注、问答入口。
+</details>
+
+<details>
+<summary><b>笔记中的图片 / 高亮文本回跳 PDF</b>（含动图）</summary>
+
+![图片回跳动图](docs/screenshots/backjump-image-demo.gif)
+
+![高亮文本回跳动图](docs/screenshots/backjump-highlight-demo.gif)
+
+笔记里的区域截图和高亮摘录都带来源链接：点击回到 PDF 对应页面，并把原来的区域/原文高亮出来。
+</details>
+
+<details>
+<summary><b>免费划词翻译</b>（含动图）</summary>
+
+![划词翻译动图](docs/screenshots/translation-selection-demo.gif)
+
+![划词翻译](docs/screenshots/translation-selection.png)
+
+内置 Bing / MyMemory 免费服务，无需 API Key；译文可直接复制或写入标注。
+</details>
+
+<details>
+<summary><b>本地整篇 PDF 翻译（PDF2zh）</b></summary>
+
+![整篇翻译](docs/screenshots/translation-whole.png)
+
+本地 PDF2zh 翻译，进度与日志实时可见（ESC 可退出等待），支持双语对照/纯译文与译文历史。
+</details>
+
+<details>
+<summary><b>免费公式识别</b>（含动图）</summary>
+
+![OCR 插入动图](docs/screenshots/ocr-insert-demo.gif)
+
+![OCR 弹窗](docs/screenshots/ocr-dialog.png)
+
+框选公式 → Texo 风格弹窗确认（源码/渲染同屏、自动排版、10 种复制格式）→ 插入笔记。
+</details>
+
+<details>
+<summary><b>OCR 引擎设置</b></summary>
+
+![OCR 设置](docs/screenshots/ocr-settings.png)
+
+Texo / UniMERNet / Pix2Text 三引擎独立服务，可单独启停；公式优先级失败自动降级。
+</details>
+
+<details>
+<summary><b>公式源码排版</b></summary>
+
+![公式排版](docs/screenshots/formula-format.png)
+
+超长公式自动换行 + 缩进 + 压缩 `\,` 噪声，渲染不变；公式块右键「格式化公式」。
+</details>
 
 ---
 
