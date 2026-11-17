@@ -763,11 +763,20 @@ export function openSettings(host: PluginHost): void {
             if (selected) {
                 const input = card.querySelector<HTMLInputElement>('[data-engine-field="dir"]');
                 if (input) input.value = selected;
+                const bundlePort = detectOcrBundle(selected).port;
+                const portInput = card.querySelector<HTMLInputElement>('[data-engine-field="port"]');
+                if (bundlePort && portInput) portInput.value = String(bundlePort);
                 inspectEngineDir(engineId);
                 banner.hidden = false;
             }
         });
-        card.querySelector<HTMLInputElement>('[data-engine-field="dir"]')?.addEventListener("change", () => inspectEngineDir(engineId));
+        card.querySelector<HTMLInputElement>('[data-engine-field="dir"]')?.addEventListener("change", () => {
+            const dirInput = card.querySelector<HTMLInputElement>('[data-engine-field="dir"]');
+            const bundlePort = detectOcrBundle(dirInput?.value.trim() || "").port;
+            const portInput = card.querySelector<HTMLInputElement>('[data-engine-field="port"]');
+            if (bundlePort && portInput) portInput.value = String(bundlePort);
+            inspectEngineDir(engineId);
+        });
         card.querySelector('[data-act="engine-check"]')?.addEventListener("click", async () => {
             setStatus(engineId, "检测中…", "warn");
             const checkConfig = readEngineConfig(engineId);
