@@ -1,3 +1,11 @@
+# Release / Tag 记录
+
+## v0.9.59
+
+- 插件：`siyuan-pdf-zotero-0.9.59.zip`（SHA256 `60E5C3201FA7ADFCD68A7D9FA40B2652C881AB47B851179AD14EA2877D9153D1`）
+- 本次更新：Zotero 离线模式、解析/翻译历史、Doc2X 解析库与翻译弹窗、OCR 引擎目录识别
+- 离线引擎包沿用 v0.9.58 附件，校验值一致
+
 # Release — v0.9.58
 
 本次发布采用 **一个 Tag + 一个 Release + 六个附件**，汇总 v0.9.56 以来的全部改动。
