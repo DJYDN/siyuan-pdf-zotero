@@ -215,6 +215,7 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
     const translationOutputs = host.store.translationOutputs();
     const parseRecords = loadParseLibrary();
     const visibleParses = parseRecords.filter(item => dockFilter.parseFilter === "all" || item.kind === dockFilter.parseFilter);
+    const visibleTranslationOutputs = dockFilter.parseFilter === "parse" ? [] : translationOutputs;
     const translationItems = translationOutputs.map(item => `
 <button class="pz-list-item" data-translation-id="${escapeHtml(item.id)}" title="${escapeHtml(item.path)}" data-sort-at="${item.createdAt}" data-kind="translate">
   <div class="pz-item-title">${escapeHtml(item.sourceTitle || item.fileName)}</div>
@@ -335,7 +336,7 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
   <div class="pz-item-meta">${item.kind === "translate" ? "翻译 MD" : "解析 MD"} · ${escapeHtml(item.model || "doc2x")} · ${escapeHtml(formatTime(item.createdAt))} · ${item.imagesCount || 0} 图${item.version > 1 ? ` · v${item.version}` : ""}${item.noteDocId ? " · 已插入" : ""}</div>
 </button>`});
         }
-        for (const item of translationOutputs) {
+        for (const item of visibleTranslationOutputs) {
             rows.push({at: item.createdAt, html: `<button class="pz-list-item" data-translation-id="${escapeHtml(item.id)}" title="${escapeHtml(item.path)}">
   <div class="pz-item-title">${escapeHtml(item.sourceTitle || item.fileName)}</div>
   <div class="pz-item-meta">翻译 · ${escapeHtml(item.provider === "doc2x" ? "Doc2X" : "PDF2zh")} · ${escapeHtml(item.mode)} · ${escapeHtml(formatTime(item.createdAt))}</div>
@@ -344,7 +345,7 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
         return rows.sort((a, b) => b.at - a.at).map(row => row.html).join("");
     })();
     const translationsView = `<section class="pz-dock-view">
-  <div class="pz-view-heading"><div><strong>解析与翻译</strong><small>${parseRecords.length} 个解析 MD · ${translationOutputs.length} 个翻译结果</small></div><div class="pz-view-heading-actions"><button data-act="open-translations-dir">打开目录</button><button data-act="clear-translations">清空记录</button></div></div>
+  <div class="pz-view-heading"><div><strong>解析与翻译</strong><small>${visibleParses.length} 条解析 MD · ${visibleTranslationOutputs.length} 个翻译结果</small></div><div class="pz-view-heading-actions"><button data-act="open-translations-dir">打开目录</button><button data-act="clear-translations">清空记录</button></div></div>
   <div class="pz-dock-filters" style="margin-bottom:6px"><select class="b3-select fn__block" data-role="parse-filter">
     <option value="all" ${dockFilter.parseFilter === "all" ? "selected" : ""}>全部（解析 + 翻译）</option>
     <option value="parse" ${dockFilter.parseFilter === "parse" ? "selected" : ""}>仅解析结果</option>
