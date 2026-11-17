@@ -14,6 +14,7 @@ import "./unit/ocr-settings.test.mjs";
 import "./unit/rect-hud.test.mjs";
 import "./unit/ocr-bundles.test.mjs";
 import "./unit/doc2x-clean.test.mjs";
+import "./unit/zotero-offline.test.mjs";
 import "./unit/formula-format.test.mjs";
 import "./unit/matrix.test.mjs";
 import "./unit/matrix-filter.test.mjs";

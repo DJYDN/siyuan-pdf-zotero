@@ -188,6 +188,8 @@ export interface Settings {
     zoteroDataDir: string;
     zoteroBaseUrl: string;
     zoteroLibraryId: number;
+    /** When Zotero is not running, read zotero.sqlite/fulltext.sqlite read-only for offline access. */
+    zoteroOfflineSqlite: boolean;
     directFsRead: boolean;
     /** Hover preview trigger: direct hover, or Alt+hover. */
     previewTrigger: PreviewTrigger;

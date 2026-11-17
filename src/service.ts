@@ -6,6 +6,7 @@ import {loadAttachmentBytes, type PickedPdf} from "./pdf/source";
 import {defaultTitleFromFileName} from "./pdf/source";
 import {detectZoteroDataDir, fileExists, readFileStat, requireNode, resolveZoteroAttachmentPath} from "./runtime";
 import {ZoteroClient, type ZoteroPdfAttachment} from "./zotero/client";
+import {readOfflineLibrary} from "./zotero/offline";
 import {zoteroItemToCsl} from "./citation/mapper";
 
 function yearFromDate(value: string): string {
@@ -364,6 +365,30 @@ export class PdfZoteroService {
         const client = new ZoteroClient(settings.zoteroBaseUrl, settings.zoteroLibraryId || 0);
         const ping = await client.ping();
         if (!ping.ok) {
+            const offlineEnabled = settings.zoteroOfflineSqlite !== false;
+            const offline = offlineEnabled && detected ? readOfflineLibrary(detected, settings.zoteroLibraryId || 0) : null;
+            if (offline && offline.items.length) {
+                // Merge offline attachment paths with anything already cached (plugin-linked PDFs).
+                const existingAttachments = this.host.store.state.zotero.attachments || [];
+                const known = new Set(offline.attachments.map(item => `${item.parentItemKey}:${item.attachmentKey}`));
+                const attachments = [...offline.attachments, ...existingAttachments.filter(item => !known.has(`${item.parentItemKey}:${item.attachmentKey}`))];
+                this.host.store.setZoteroCache({
+                    libraryId: settings.zoteroLibraryId || 0,
+                    dataDir: detected,
+                    updatedAt: Date.now(),
+                    lastError: `离线模式：已从 zotero.sqlite 读取 ${offline.items.length} 条文献（Zotero 未运行）`,
+                    items: offline.items,
+                    collections: offline.collections,
+                    attachments,
+                });
+                await this.host.store.save();
+                this.host.refreshDock();
+                this.host.logDebug("zotero.offline.full", {items: offline.items.length, attachments: attachments.length});
+                if (!silent) {
+                    showMessage(`Zotero 未运行，已离线读取 ${offline.items.length} 条文献`, 4000);
+                }
+                return;
+            }
             await this.hydrateOfflineAttachments();
             this.host.store.setZoteroCache({
                 libraryId: settings.zoteroLibraryId || 0,

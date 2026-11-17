@@ -201,6 +201,8 @@ export function openSettings(host: PluginHost): void {
       <label class="fn__flex" style="flex-direction:column;gap:4px;margin-bottom:12px"><span>Zotero Local API 地址</span><input class="b3-text-field fn__block" data-field="baseUrl" value="${escapeHtml(settings.zoteroBaseUrl)}" /></label>
       <label class="fn__flex" style="flex-direction:column;gap:4px;margin-bottom:12px"><span>Zotero 数据目录</span><input class="b3-text-field fn__block" data-field="dataDir" value="${escapeHtml(settings.zoteroDataDir)}" placeholder="自动检测，例如 E:\\Tools\\Zotero" /><span class="pz-help">用于解析 storage: 附件路径；留空=自动读取 Zotero prefs。</span></label>
       <label class="fn__flex" style="flex-direction:column;gap:4px"><span>库 ID（个人库填 0）</span><input class="b3-text-field fn__block" data-field="libraryId" value="${settings.zoteroLibraryId}" /></label>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:10px"><input type="checkbox" data-field="zoteroOfflineSqlite" ${settings.zoteroOfflineSqlite !== false ? "checked" : ""}/> Zotero 未运行时读取本机 zotero.sqlite（离线模式）</label>
+      <div class="pz-help">开启后即使 Zotero 没启动，也能读取文献列表、分类、附件和全文索引（只读，不修改数据库）。</div>
     </div>
     <div class="pz-ocr-section">
       <div class="pz-ocr-section-title">阅读与摘录</div>
@@ -609,6 +611,7 @@ export function openSettings(host: PluginHost): void {
         return {
             zoteroBaseUrl: fieldValue("baseUrl") || "http://127.0.0.1:23119",
             zoteroDataDir: fieldValue("dataDir"),
+            zoteroOfflineSqlite: checked("zoteroOfflineSqlite"),
             zoteroLibraryId: Number.parseInt(fieldValue("libraryId"), 10) || 0,
             previewTrigger: radioValue("pzPreviewTrigger") === "alt" ? "alt" : "hover",
             excerptTemplate: fieldValue("excerptTemplate") || "{text}",

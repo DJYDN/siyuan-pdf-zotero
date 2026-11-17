@@ -81,6 +81,7 @@ export function defaultState(): PersistedState {
             zoteroDataDir: "",
             zoteroBaseUrl: "http://127.0.0.1:23119",
             zoteroLibraryId: 0,
+            zoteroOfflineSqlite: true,
             directFsRead: true,
             previewTrigger: "hover",
             excerptTemplate: "{text}",
