@@ -1,6 +1,6 @@
 export const PLUGIN_NAME = "siyuan-pdf-zotero";
 export const PLUGIN_DISPLAY_NAME = "PDF × Zotero";
-export const VERSION = "0.1.0";
+export const VERSION = "0.9.58";
 
 export const TAB_TYPE = "pdf_zotero_reader";
 export const DOCK_TYPE = "pdf_zotero_dock";

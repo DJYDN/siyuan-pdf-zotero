@@ -16,6 +16,8 @@ import {applyQaBlockTheme} from "../qa/theme";
 import {syncTranslationHistory} from "../translation/history";
 import {effectiveTargetLang} from "../translation/target-lang";
 
+declare const __PZ_REPO_ROOT__: string;
+
 let settingsDialog: Dialog | null = null;
 
 function escapeHtml(text: string): string {
@@ -730,6 +732,14 @@ export function openSettings(host: PluginHost): void {
         target.innerHTML = checks.map(item => `<div>${item.ok ? "✓" : "✗"} ${escapeHtml(item.label)}：${escapeHtml(item.detail).replace(/\n/g, "<br>")}</div>`).join("");
     };
     const refreshEngineStatus = async (id: OcrEngineId): Promise<void> => {
+        const config = readEngineConfig(id);
+        if (config.dir) {
+            const bundle = detectOcrBundle(config.dir);
+            if (bundle.kind !== "unknown" && !isBundleCompatible(bundle, id)) {
+                setStatus(id, "目录不匹配", "error");
+                return;
+            }
+        }
         const health = await getOcrHealth(probeSettings(), id);
         setStatus(id, health.ok ? "运行中" : "未运行", health.ok ? "ok" : "idle");
     };
@@ -843,8 +853,18 @@ export function openSettings(host: PluginHost): void {
         if (!path?.join) return [];
         const dataDir = String((window as any).siyuan?.config?.system?.dataDir || "").trim();
         if (!dataDir) return [];
-        const pluginDir = path.join(dataDir, "plugins", "siyuan-pdf-zotero");
-        return [pluginDir, path.join(pluginDir, "services"), path.join(dataDir, "plugins")];
+        const roots: string[] = [];
+        {
+            const pluginDir = path.join(dataDir, "plugins", "siyuan-pdf-zotero");
+            roots.push(pluginDir, path.join(pluginDir, "services"), path.join(dataDir, "plugins"));
+        }
+        try {
+            const repoRoot = typeof __PZ_REPO_ROOT__ === "string" ? __PZ_REPO_ROOT__ : "";
+            if (repoRoot) roots.push(path.join(repoRoot, "release"));
+        } catch {
+            // production build may not define the repo root
+        }
+        return roots;
     };
     const autoFillBundles = async (manual = false): Promise<void> => {
         const found = discoverBundles(localRoots());
