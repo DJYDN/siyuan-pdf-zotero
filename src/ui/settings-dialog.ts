@@ -8,7 +8,8 @@ import {TRANSLATION_TARGETS, translateText} from "../translation/service";
 import {checkPdf2zhEnvironment, ensurePdf2zhServer} from "../translation/pdf2zh";
 import {checkDoc2xEnvironment} from "../translation/doc2x";
 import {checkOcrEngineEnvironment, checkOcrEnvironment, ensureOcrEngine, restartOcrEngine, stopOcrEngine} from "../ocr/service";
-import {defaultFormulaOrder, engineConfig, isOcrEngineId, OCR_ENGINE_DEFS, OCR_ENGINE_IDS} from "../ocr/engines";
+import {defaultFormulaOrder, engineConfig, isOcrEngineId, normalizeDirKey, OCR_ENGINE_DEFS, OCR_ENGINE_IDS} from "../ocr/engines";
+import {detectOcrBundle, detectPdf2zhServer, discoverBundles, isBundleCompatible, readBundleLogTail} from "../ocr/bundles";
 import {getOcrHealth} from "../ocr/client";
 import type {OcrEngineConfig, OcrEngineId, OcrEngineMap, Settings, TranslationServiceConfig} from "../types";
 import {applyQaBlockTheme} from "../qa/theme";
@@ -86,6 +87,7 @@ function ocrEngineCardHtml(id: OcrEngineId, settings: Settings): string {
       <label class="pz-engine-toggle"><input type="checkbox" data-engine-field="enabled" ${config.enabled ? "checked" : ""}/> <strong>${escapeHtml(def.name)}</strong></label>
       <span class="pz-muted" style="font-size:11px">${escapeHtml(def.summary)} · 默认端口 ${def.defaultPort}</span>
       <span class="pz-engine-status" data-role="engine-status">未检测</span>
+      <span class="pz-muted pz-shared-port" data-role="shared-port" hidden style="font-size:11px"></span>
     </div>
     <div class="fn__flex" style="gap:6px;margin-top:6px">
       <input class="b3-text-field fn__block" data-engine-field="dir" value="${escapeHtml(config.dir)}" placeholder="${escapeHtml(def.dirHint)}" style="flex:1" />
@@ -246,9 +248,9 @@ export function openSettings(host: PluginHost): void {
         <summary class="pz-ocr-section-title">PDF2zh（本地 Server）</summary>
         <div data-apply="true">
           <label class="fn__flex" style="flex-direction:column;gap:4px;margin-bottom:8px"><span>PDF2zh 地址</span><input class="b3-text-field fn__block" data-field="pdf2zhBaseUrl" value="${escapeHtml(settings.pdf2zhBaseUrl)}" placeholder="http://127.0.0.1:8890" /><span class="pz-help">修改后需点「立即应用」生效。</span></label>
-          <label class="fn__flex" style="flex-direction:column;gap:4px;margin-bottom:8px"><span>PDF2zh 服务目录（可选，自动启动）</span><input class="b3-text-field fn__block" data-field="pdf2zhServerPath" value="${escapeHtml(settings.pdf2zhServerPath)}" placeholder="例如 D:\\SiYuan-PDF2zh-Portable\\pdf2zh-server" /><span class="pz-help">指向便携包里的服务器目录；留空则只连接已运行的地址。修改后需点「立即应用」。</span></label>
+          <label class="fn__flex" style="flex-direction:column;gap:4px;margin-bottom:8px"><span>PDF2zh 服务目录（可选，自动启动）</span><div class="fn__flex" style="gap:6px"><input class="b3-text-field fn__block" data-field="pdf2zhServerPath" value="${escapeHtml(settings.pdf2zhServerPath)}" placeholder="选择 SiYuan-PDF2zh-Portable 里的 pdf2zh-server 目录" style="flex:1" /><button class="b3-button b3-button--outline" data-act="pdf2zh-dir-pick" style="flex:0 0 auto">选择目录</button></div><span class="pz-help">指向便携包里的 pdf2zh-server 目录（含 pz_server.py）；留空则只连接已运行的地址。修改后需点「立即应用」。</span></label>
         </div>
-        <button class="b3-button b3-button--outline" data-act="pdf2zh-check" style="margin-bottom:6px">检测 PDF2zh 环境</button>
+        <button class="b3-button b3-button--outline" data-act="pdf2zh-check" style="margin-bottom:6px">检测 PDF2zh 环境</button><button class="b3-button b3-button--outline" data-act="pdf2zh-auto-index" style="margin-bottom:6px;margin-left:6px">自动检测目录</button>
         <div data-role="pdf2zh-env" class="pz-muted" style="font-size:12px;line-height:1.6;margin-bottom:8px"></div>
         <div class="fn__flex" style="gap:8px;margin-bottom:8px">
           <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>引擎</span><select class="b3-select fn__block" data-field="pdf2zhEngine"><option value="pdf2zh_next" ${settings.pdf2zhEngine === "pdf2zh_next" ? "selected" : ""}>pdf2zh_next</option><option value="pdf2zh" ${settings.pdf2zhEngine === "pdf2zh" ? "selected" : ""}>pdf2zh</option></select></label>
@@ -314,7 +316,7 @@ export function openSettings(host: PluginHost): void {
         <label class="fn__flex" style="flex-direction:column;gap:4px;margin-top:8px"><span>共享 Python 运行时目录（可选）</span><div style="display:flex;gap:6px"><input class="b3-text-field fn__block" data-field="ocrSharedRuntimeDir" value="${escapeHtml(settings.ocrSharedRuntimeDir)}" placeholder="例如 D:\\SiYuan\\OCR-Runtime" style="flex:1" /><button class="b3-button b3-button--outline" data-act="ocr-shared-runtime-pick" style="flex:0 0 auto">选择目录</button></div><span class="pz-help">留空使用引擎包内自带 runtime。</span></label>
         <label class="fn__flex" style="flex-direction:column;gap:4px;margin-top:6px"><span>自定义启动命令（可选）</span><input class="b3-text-field fn__block" data-field="ocrStartCommand" value="${escapeHtml(settings.ocrStartCommand)}" placeholder="留空按目录内脚本自动启动" /><span class="pz-help">一般留空即可；只有引擎包启动脚本不标准时才填写。</span></label>
       </div>
-      <div class="pz-ocr-actions" style="margin-top:8px"><button class="b3-button b3-button--outline" data-act="ocr-check">检测全部引擎</button></div>
+      <div class="pz-ocr-actions" style="margin-top:8px"><button class="b3-button b3-button--outline" data-act="ocr-check">检测全部引擎</button><button class="b3-button b3-button--outline" data-act="ocr-auto-index">自动检测服务包</button></div>
       <div data-role="ocr-env" class="pz-muted" style="font-size:12px;line-height:1.6"></div>
     </details>
     <details class="pz-ocr-section">
@@ -468,10 +470,86 @@ export function openSettings(host: PluginHost): void {
             autoStart: Boolean(card.querySelector<HTMLInputElement>('[data-engine-field="autoStart"]')?.checked),
         };
     };
-    const collectOcrEngines = (): OcrEngineMap => {
+    const readEnginesRaw = (): OcrEngineMap => {
         const map = {} as OcrEngineMap;
         for (const id of OCR_ENGINE_IDS) map[id] = readEngineConfig(id);
         return map;
+    };
+    const normalizePorts = (map: OcrEngineMap): OcrEngineMap => {
+        // Engines pointing at the same directory share one service process, so they must
+        // share one port. Pick the primary engine's port (pix2text > unimernet > texo).
+        const groups = new Map<string, {ids: OcrEngineId[]; port: number}>();
+        for (const id of ["pix2text", "unimernet", "texo"] as OcrEngineId[]) {
+            const key = normalizeDirKey(map[id].dir);
+            if (!key) continue;
+            const group = groups.get(key);
+            if (group) {
+                group.ids.push(id);
+            } else {
+                groups.set(key, {ids: [id], port: map[id].port});
+            }
+        }
+        for (const group of groups.values()) {
+            if (group.ids.length < 2) continue;
+            for (const id of group.ids) {
+                map[id] = {...map[id], port: group.port};
+            }
+        }
+        return map;
+    };
+    const collectOcrEngines = (): OcrEngineMap => normalizePorts(readEnginesRaw());
+    const validateOcrEngines = (engines: OcrEngineMap): string => {
+        for (const id of OCR_ENGINE_IDS) {
+            const config = engines[id];
+            if (!config?.enabled || !config.dir) continue;
+            const bundle = detectOcrBundle(config.dir);
+            const name = OCR_ENGINE_DEFS[id].name;
+            if (bundle.kind === "unknown") {
+                return `${name}：目录里没有可识别的服务（需要 service.py 或 pz_ocr_server.py）`;
+            }
+            if (!isBundleCompatible(bundle, id)) {
+                const hint = id === "texo" ? "Texo 请选择 OCR-Texo-Portable 解压目录" : `请选择 ${name} 对应的引擎包`;
+                return `${name}：该目录是「${bundle.label}」，不能用于 ${name}。${hint}`;
+            }
+        }
+        return "";
+    };
+    const syncEnginePortHints = (): void => {
+        const engines = collectOcrEngines();
+        for (const id of OCR_ENGINE_IDS) {
+            const card = engineCardElement(id);
+            if (!card) continue;
+            const portInput = card.querySelector<HTMLInputElement>('[data-engine-field="port"]');
+            if (portInput) portInput.value = String(engines[id].port);
+            const hint = card.querySelector<HTMLElement>('[data-role="shared-port"]');
+            if (!hint) continue;
+            const key = normalizeDirKey(engines[id].dir);
+            const shared = Boolean(key) && OCR_ENGINE_IDS.some(other => other !== id && normalizeDirKey(engines[other].dir) === key);
+            hint.hidden = !shared;
+            hint.textContent = shared ? `共用端口 ${engines[id].port}` : "";
+        }
+    };
+    const inspectEngineDir = (id: OcrEngineId): void => {
+        const card = engineCardElement(id);
+        if (!card) return;
+        const dir = card.querySelector<HTMLInputElement>('[data-engine-field="dir"]')?.value.trim() || "";
+        if (!dir) {
+            renderEngineEnv(id, []);
+            setStatus(id, "未检测");
+            return;
+        }
+        const bundle = detectOcrBundle(dir);
+        const compatible = isBundleCompatible(bundle, id);
+        renderEngineEnv(id, [{
+            label: "目录类型",
+            ok: compatible,
+            detail: compatible
+                ? `${bundle.label}${bundle.port ? ` · 建议端口 ${bundle.port}` : ""}`
+                : `${bundle.label}，不能用于 ${OCR_ENGINE_DEFS[id].name}`,
+        }]);
+        if (!compatible) {
+            setStatus(id, "目录不匹配", "error");
+        }
     };
     const formulaOrderSelects = Array.from(root.querySelectorAll<HTMLSelectElement>('[data-role="formula-order"]'));
     const collectFormulaOrder = (): OcrEngineId[] => {
@@ -609,12 +687,30 @@ export function openSettings(host: PluginHost): void {
 
     let saveTimer = 0;
     let lastSavedAt = "";
+    let lastValidationError = "";
+    const reportValidationError = (error: string): void => {
+        saveState.textContent = `未保存：${error}`;
+        saveState.dataset.tone = "error";
+        if (error !== lastValidationError) {
+            lastValidationError = error;
+            showMessage(`未保存：${error}`, 6000, "error");
+        }
+    };
     const persist = async (): Promise<void> => {
         window.clearTimeout(saveTimer);
         if (closed()) return;
+        const staged = collectSettings(true);
+        const error = validateOcrEngines((staged as Settings).ocrEngines);
+        if (error) {
+            reportValidationError(error);
+            return;
+        }
+        lastValidationError = "";
         host.store.updateSettings(collectSettings(false));
         await host.store.save();
+        syncEnginePortHints();
         lastSavedAt = new Date().toLocaleTimeString();
+        saveState.dataset.tone = "";
         saveState.textContent = `已保存 ${lastSavedAt}`;
     };
     const schedulePersist = (): void => {
@@ -631,7 +727,7 @@ export function openSettings(host: PluginHost): void {
     const renderEngineEnv = (id: OcrEngineId, checks: Array<{label: string; ok: boolean; detail: string}>): void => {
         const target = engineCardElement(id)?.querySelector<HTMLElement>('[data-role="engine-env"]');
         if (!target) return;
-        target.innerHTML = checks.map(item => `<div>${item.ok ? "✓" : "✗"} ${escapeHtml(item.label)}：${escapeHtml(item.detail)}</div>`).join("");
+        target.innerHTML = checks.map(item => `<div>${item.ok ? "✓" : "✗"} ${escapeHtml(item.label)}：${escapeHtml(item.detail).replace(/\n/g, "<br>")}</div>`).join("");
     };
     const refreshEngineStatus = async (id: OcrEngineId): Promise<void> => {
         const health = await getOcrHealth(probeSettings(), id);
@@ -647,13 +743,34 @@ export function openSettings(host: PluginHost): void {
             if (selected) {
                 const input = card.querySelector<HTMLInputElement>('[data-engine-field="dir"]');
                 if (input) input.value = selected;
-                setStatus(engineId, "目录已更新，待应用", "warn");
+                inspectEngineDir(engineId);
                 banner.hidden = false;
             }
         });
+        card.querySelector<HTMLInputElement>('[data-engine-field="dir"]')?.addEventListener("change", () => inspectEngineDir(engineId));
         card.querySelector('[data-act="engine-check"]')?.addEventListener("click", async () => {
             setStatus(engineId, "检测中…", "warn");
-            const result = await checkOcrEngineEnvironment(probeSettings(), engineId);
+            const checkConfig = readEngineConfig(engineId);
+            const checkBundle = detectOcrBundle(checkConfig.dir);
+            if (checkConfig.dir && !isBundleCompatible(checkBundle, engineId)) {
+                renderEngineEnv(engineId, [{label: "目录类型", ok: false, detail: `${checkBundle.label}，不能用于 ${OCR_ENGINE_DEFS[engineId].name}`}]);
+                setStatus(engineId, "目录不匹配", "error");
+                return;
+            }
+            let result = await checkOcrEngineEnvironment(probeSettings(), engineId);
+            const config = readEngineConfig(engineId);
+            if (!result.health?.ok && result.script && result.python && config.enabled) {
+                setStatus(engineId, "启动中…", "warn");
+                const started = await ensureOcrEngine(probeSettings(), engineId);
+                result = await checkOcrEngineEnvironment(probeSettings(), engineId);
+                if (!result.health?.ok) {
+                    const tail = readBundleLogTail(config.dir, 8);
+                    if (tail) {
+                        result.checks.push({label: "启动失败", ok: false, detail: started.error || "服务未就绪"});
+                        result.checks.push({label: "服务日志", ok: false, detail: tail});
+                    }
+                }
+            }
             renderEngineEnv(engineId, result.checks);
             setStatus(engineId, result.ok ? "环境正常" : (result.health?.ok ? "需检查" : "未运行"), result.ok ? "ok" : "warn");
         });
@@ -661,7 +778,12 @@ export function openSettings(host: PluginHost): void {
             setStatus(engineId, "启动中…", "warn");
             const started = await ensureOcrEngine(probeSettings(), engineId);
             setStatus(engineId, started.ok ? "运行中" : "启动失败", started.ok ? "ok" : "error");
-            if (!started.ok) renderEngineEnv(engineId, [{label: "启动失败", ok: false, detail: started.error || "未知错误"}]);
+            if (!started.ok) {
+                const checks = [{label: "启动失败", ok: false, detail: started.error || "未知错误"}];
+                const tail = readBundleLogTail(readEngineConfig(engineId).dir, 8);
+                if (tail) checks.push({label: "服务日志", ok: false, detail: tail});
+                renderEngineEnv(engineId, checks);
+            }
         });
         card.querySelector('[data-act="engine-stop"]')?.addEventListener("click", async () => {
             setStatus(engineId, "停止中…", "warn");
@@ -673,8 +795,14 @@ export function openSettings(host: PluginHost): void {
             setStatus(engineId, "重启中…", "warn");
             const restarted = await restartOcrEngine(probeSettings(), engineId);
             setStatus(engineId, restarted.ok ? "运行中" : "重启失败", restarted.ok ? "ok" : "error");
-            if (!restarted.ok) renderEngineEnv(engineId, [{label: "重启失败", ok: false, detail: restarted.error || "未知错误"}]);
+            if (!restarted.ok) {
+                const checks = [{label: "重启失败", ok: false, detail: restarted.error || "未知错误"}];
+                const tail = readBundleLogTail(readEngineConfig(engineId).dir, 8);
+                if (tail) checks.push({label: "服务日志", ok: false, detail: tail});
+                renderEngineEnv(engineId, checks);
+            }
         });
+        inspectEngineDir(engineId);
         void refreshEngineStatus(engineId);
     }
     root.querySelector('[data-act="ocr-shared-runtime-pick"]')?.addEventListener("click", async () => {
@@ -688,13 +816,73 @@ export function openSettings(host: PluginHost): void {
     const ocrEnv = root.querySelector<HTMLElement>('[data-role="ocr-env"]')!;
     root.querySelector('[data-act="ocr-check"]')?.addEventListener("click", async () => {
         ocrEnv.textContent = "检测中…";
-        const result = await checkOcrEnvironment(probeSettings());
+        let result = await checkOcrEnvironment(probeSettings());
+        const notRunning = result.engines.filter(item => !item.health?.ok && item.script && item.python);
+        for (const engineResult of notRunning) {
+            ocrEnv.textContent = `正在启动 ${OCR_ENGINE_DEFS[engineResult.engine].name}…`;
+            setStatus(engineResult.engine, "启动中…", "warn");
+            await ensureOcrEngine(probeSettings(), engineResult.engine);
+        }
+        if (notRunning.length) {
+            result = await checkOcrEnvironment(probeSettings());
+        }
         const lines = result.checks.map(item => `<div>${item.ok ? "✓" : "✗"} ${escapeHtml(item.label)}：${escapeHtml(item.detail)}</div>`);
         ocrEnv.innerHTML = lines.length ? lines.join("") : "<div>未启用任何引擎</div>";
         for (const engineResult of result.engines) {
             setStatus(engineResult.engine, engineResult.ok ? "环境正常" : (engineResult.health?.ok ? "需检查" : "未运行"), engineResult.ok ? "ok" : "warn");
+            if (!engineResult.health?.ok) {
+                const tail = readBundleLogTail(engineConfig(probeSettings(), engineResult.engine).dir, 6);
+                if (tail) renderEngineEnv(engineResult.engine, [{label: "服务日志", ok: false, detail: tail}]);
+            }
         }
     });
+
+    // ---- local bundle discovery / auto fill --------------------------------
+    const localRoots = (): string[] => {
+        const path = requireNode("path");
+        if (!path?.join) return [];
+        const dataDir = String((window as any).siyuan?.config?.system?.dataDir || "").trim();
+        if (!dataDir) return [];
+        const pluginDir = path.join(dataDir, "plugins", "siyuan-pdf-zotero");
+        return [pluginDir, path.join(pluginDir, "services"), path.join(dataDir, "plugins")];
+    };
+    const autoFillBundles = async (manual = false): Promise<void> => {
+        const found = discoverBundles(localRoots());
+        const engineForKind: Record<string, OcrEngineId> = {texo: "texo", unimernet: "unimernet", pix2text: "pix2text", legacy: "pix2text"};
+        let filled = 0;
+        for (const [kind, engineId] of Object.entries(engineForKind)) {
+            const dir = found.ocr[kind as keyof typeof found.ocr];
+            if (!dir) continue;
+            const card = engineCardElement(engineId);
+            if (!card) continue;
+            const input = card.querySelector<HTMLInputElement>('[data-engine-field="dir"]');
+            if (!input || input.value.trim()) continue;
+            input.value = dir;
+            const port = detectOcrBundle(dir).port;
+            const portInput = card.querySelector<HTMLInputElement>('[data-engine-field="port"]');
+            if (port && portInput && (!portInput.value.trim() || Number(portInput.value) === OCR_ENGINE_DEFS[engineId].defaultPort)) {
+                portInput.value = String(port);
+            }
+            inspectEngineDir(engineId);
+            filled += 1;
+        }
+        const pdf2zhInput = field<HTMLInputElement>("pdf2zhServerPath");
+        if (pdf2zhInput && !pdf2zhInput.value.trim() && found.pdf2zh.length) {
+            pdf2zhInput.value = found.pdf2zh[0];
+            filled += 1;
+        }
+        if (filled > 0) {
+            host.store.updateSettings(collectSettings(true));
+            await host.store.save();
+            syncEnginePortHints();
+            banner.hidden = true;
+            showMessage(`已自动填入 ${filled} 个本地服务目录`, 3200);
+        } else if (manual) {
+            showMessage("没有发现新的可填目录（已填写的不会被覆盖）", 3200);
+        }
+    };
+    root.querySelector('[data-act="ocr-auto-index"]')?.addEventListener("click", () => { void autoFillBundles(true); });
+    root.querySelector('[data-act="pdf2zh-auto-index"]')?.addEventListener("click", () => { void autoFillBundles(true); });
 
     // ---- translation ----------------------------------------------------
     root.querySelector('[data-act="pick-translation-dir"]')?.addEventListener("click", async () => {
@@ -704,6 +892,21 @@ export function openSettings(host: PluginHost): void {
             input.value = selected;
             schedulePersist();
         }
+    });
+    root.querySelector('[data-act="pdf2zh-dir-pick"]')?.addEventListener("click", async () => {
+        const selected = await pickDirectory();
+        const input = field<HTMLInputElement>("pdf2zhServerPath");
+        if (!selected || !input) return;
+        const path = requireNode("path");
+        const nested = path?.join ? path.join(selected, "pdf2zh-server") : "";
+        const target = detectPdf2zhServer(selected) ? selected : (nested && detectPdf2zhServer(nested) ? nested : "");
+        if (!target) {
+            showMessage("该目录没有 pz_server.py，请选择 SiYuan-PDF2zh-Portable 或其中的 pdf2zh-server 目录", 6000, "error");
+            return;
+        }
+        input.value = target;
+        banner.hidden = false;
+        showMessage("已选择 PDF2zh 目录，点「立即应用」生效", 3200);
     });
     const pdf2zhEnv = root.querySelector<HTMLElement>('[data-role="pdf2zh-env"]')!;
     root.querySelector('[data-act="pdf2zh-check"]')?.addEventListener("click", async () => {
@@ -932,9 +1135,18 @@ export function openSettings(host: PluginHost): void {
     });
     const applyButton = root.querySelector<HTMLButtonElement>('[data-act="apply"]');
     applyButton?.addEventListener("click", async () => {
-        host.store.updateSettings(collectSettings(true));
+        const staged = collectSettings(true);
+        const error = validateOcrEngines((staged as Settings).ocrEngines);
+        if (error) {
+            reportValidationError(error);
+            return;
+        }
+        lastValidationError = "";
+        host.store.updateSettings(staged);
         await host.store.save();
+        syncEnginePortHints();
         banner.hidden = true;
+        saveState.dataset.tone = "";
         saveState.textContent = `已应用 ${new Date().toLocaleTimeString()}`;
         for (const id of OCR_ENGINE_IDS) void refreshEngineStatus(id);
         host.refreshDock();
@@ -950,6 +1162,8 @@ export function openSettings(host: PluginHost): void {
         settingsDialog = null;
     };
     root.querySelector('[data-act="cancel"]')?.addEventListener("click", () => { void close(); });
+    syncEnginePortHints();
+    void autoFillBundles(false);
     root.querySelector<HTMLButtonElement>('[data-field="citationStyle"]')?.addEventListener("change", () => {});
     const citationStyle = field<HTMLSelectElement>("citationStyle");
     if (citationStyle) {

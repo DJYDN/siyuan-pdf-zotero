@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {JSDOM} from "jsdom";
+import {createRequire} from "node:module";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+globalThis.__pzNodeRequire = createRequire(import.meta.url);
 
 const win = globalThis.window && globalThis.document
     ? globalThis.window
@@ -268,7 +274,11 @@ test("paste button uses a clipboard image and re-runs recognition", async () => 
     clipboardImages.length = 0;
     clipboardImages.push(new win.Blob([new Uint8Array([137, 80, 78, 71])], {type: "image/png"}));
     const settings = baseSettings();
-    settings.ocrEngines.texo = {enabled: true, dir: "D:/OCR/Texo", port: 8893, autoStart: true};
+    const texoBundle = fs.mkdtempSync(path.join(os.tmpdir(), "pz-texo-"));
+    fs.writeFileSync(path.join(texoBundle, "service.py"), "");
+    fs.writeFileSync(path.join(texoBundle, "texo_engine.py"), "");
+    fs.writeFileSync(path.join(texoBundle, "config.json"), JSON.stringify({port: 8893}));
+    settings.ocrEngines.texo = {enabled: true, dir: texoBundle, port: 8893, autoStart: true};
     settings.ocrFormulaOrder = ["texo", "unimernet", "pix2text"];
     const host = makeHost(settings);
     const dialog = openOcrResultDialog(host, formulaResult("a+b"), {source: "clipboard", engine: "texo"});

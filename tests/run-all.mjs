@@ -12,6 +12,7 @@ import "./unit/ocr-engines.test.mjs";
 import "./unit/ocr-dialog.test.mjs";
 import "./unit/ocr-settings.test.mjs";
 import "./unit/rect-hud.test.mjs";
+import "./unit/ocr-bundles.test.mjs";
 import "./unit/formula-format.test.mjs";
 import "./unit/matrix.test.mjs";
 import "./unit/matrix-filter.test.mjs";

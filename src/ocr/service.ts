@@ -100,13 +100,11 @@ function resolveScript(group: OcrServiceGroup): string {
             }
         }
     }
-    // Also accept a script from a disabled engine living in the same directory.
-    for (const candidates of Object.values(OCR_ENGINE_DEFS)) {
-        for (const script of candidates.scriptCandidates) {
-            const candidate = path.join(group.dir, script);
-            if (fileExists(candidate)) {
-                return candidate;
-            }
+    // Legacy shared service: only usable by Pix2Text / UniMERNet, never by Texo.
+    if (group.engines.some(id => id === "pix2text" || id === "unimernet")) {
+        const legacy = path.join(group.dir, "pz_ocr_server.py");
+        if (fileExists(legacy)) {
+            return legacy;
         }
     }
     return "";
@@ -152,6 +150,8 @@ export async function checkOcrEngineEnvironment(settings: Settings, engine: OcrE
     add("启用状态", config.enabled, config.enabled ? "已启用" : "未启用");
     const dirExists = Boolean(paths.dir) && Boolean(requireNode("fs")?.existsSync?.(paths.dir));
     add("服务目录", dirExists, paths.dir || `未选择目录（${def.dirHint}）`);
+    const bundle = detectOcrBundle(paths.dir);
+    add("目录类型", isBundleCompatible(bundle, engine), bundle.kind === "unknown" ? "未识别的目录" : `${bundle.label}${isBundleCompatible(bundle, engine) ? "" : "（不适用于该引擎）"}`);
     add("服务脚本", Boolean(paths.script), paths.script || `未找到 ${def.scriptCandidates.join(" / ")}`);
     add("Python 运行时", Boolean(paths.python || settings.ocrStartCommand?.trim()),
         paths.python || (settings.ocrStartCommand?.trim() ? "使用自定义启动命令" : "未找到 runtime/python.exe（可配置共享运行时目录）"));
@@ -213,7 +213,27 @@ async function waitForHealth(settings: Settings, engine: OcrEngineId, timeoutMs:
  * Make sure the service that hosts `engine` is running.
  * Returns `{ok, started}`; `started` is true when this call spawned the process.
  */
+
+function engineBundleError(settings: Settings, engine: OcrEngineId): string {
+    const dir = engineConfig(settings, engine).dir.trim();
+    if (!dir) {
+        return "";
+    }
+    const bundle = detectOcrBundle(dir);
+    if (!bundle.kind || bundle.kind === "unknown") {
+        return `${OCR_ENGINE_DEFS[engine].name} 目录里没有可识别的服务（需要 service.py 或 pz_ocr_server.py）`;
+    }
+    if (!isBundleCompatible(bundle, engine)) {
+        return `${OCR_ENGINE_DEFS[engine].name} 目录不匹配：该目录是「${bundle.label}」，不能用于 ${OCR_ENGINE_DEFS[engine].name}`;
+    }
+    return "";
+}
+
 export async function ensureOcrEngine(settings: Settings, engine: OcrEngineId): Promise<{ok: boolean; started: boolean; error?: string; pid?: number}> {
+    const bundleError = engineBundleError(settings, engine);
+    if (bundleError) {
+        return {ok: false, started: false, error: bundleError};
+    }
     const health = await getOcrHealth(settings, engine);
     if (health.ok) {
         return {ok: true, started: false, pid: health.pid};
@@ -347,6 +367,11 @@ export async function recognizeWithFallback(
     }
     for (const engine of engines) {
         const config = engineConfig(settings, engine);
+        const bundleError = engineBundleError(settings, engine);
+        if (bundleError) {
+            attempts.push({engine, ok: false, skipped: bundleError});
+            continue;
+        }
         if (!config.dir.trim()) {
             attempts.push({engine, ok: false, skipped: "未配置服务目录"});
             continue;
@@ -367,3 +392,4 @@ export async function recognizeWithFallback(
     }
     throw new OcrHttpError(`OCR 识别失败 — ${summarizeAttempts(attempts)}`);
 }
+import {detectOcrBundle, isBundleCompatible} from "./bundles";
