@@ -18,7 +18,7 @@ if (!esbuild) {
     process.exit(1);
 }
 
-const entries = ["anchor", "runtime", "asset-path", "storage", "link-format", "pdf/source", "pdf/links", "citation/mapper", "ocr/client", "ocr/engines", "ocr/convert", "ui/ocr-dialog", "ui/dock", "ui/rect-select", "ui/pdf2zh-hud", "ui/styles", "ocr/latex-format", "ui/formula-format", "ocr/bundles", "translation/doc2x", "matrix/model", "matrix/filter", "matrix/relationships", "matrix/canvas"];
+const entries = ["anchor", "runtime", "asset-path", "storage", "link-format", "pdf/source", "pdf/links", "citation/mapper", "ocr/client", "ocr/engines", "ocr/convert", "ui/ocr-dialog", "ui/dock", "ui/rect-select", "ui/pdf2zh-hud", "ui/styles", "ocr/latex-format", "ui/formula-format", "ocr/bundles", "translation/doc2x", "doc2x/clean", "matrix/model", "matrix/filter", "matrix/relationships", "matrix/canvas"];
 const siyuanStub = path.join(root, "tests", "stubs", "siyuan.mjs");
 for (const entry of entries) {
     const out = path.join(outDir, entry.replace("/", "-") + ".mjs");

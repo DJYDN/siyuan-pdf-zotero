@@ -236,6 +236,10 @@ export interface Settings {
     doc2xTranslateType: "md" | "pdf";
     /** PDF 解析使用的图片 OCR 模型。 */
     doc2xParseImageModel: "doc2x" | "mathpix";
+    /** Max number of Doc2X parse results kept in the parse library. */
+    doc2xParseHistoryLimit: number;
+    /** Max total size (MB) of the parse library before the oldest records are removed. */
+    doc2xParseHistoryMaxMB: number;
     /** PDF 解析使用的视觉模型 ID（来自 doc2x models list）。 */
     doc2xVisionModel: string;
     doc2xTermId: string;

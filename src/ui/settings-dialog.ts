@@ -7,6 +7,7 @@ import {TRANSLATION_SERVICE_TYPES, defaultTranslationServices} from "../translat
 import {TRANSLATION_TARGETS, translateText} from "../translation/service";
 import {checkPdf2zhEnvironment, ensurePdf2zhServer} from "../translation/pdf2zh";
 import {checkDoc2xEnvironment, fetchDoc2xModelList} from "../translation/doc2x";
+import {clearParseLibrary, enforceParseLimits, loadParseLibrary, removeParseRecord} from "../doc2x/library";
 import {checkOcrEngineEnvironment, checkOcrEnvironment, ensureOcrEngine, restartOcrEngine, stopOcrEngine} from "../ocr/service";
 import {defaultFormulaOrder, engineConfig, isOcrEngineId, normalizeDirKey, OCR_ENGINE_DEFS, OCR_ENGINE_IDS} from "../ocr/engines";
 import {detectOcrBundle, detectPdf2zhServer, discoverBundles, isBundleCompatible, readBundleLogTail} from "../ocr/bundles";
@@ -300,6 +301,12 @@ export function openSettings(host: PluginHost): void {
         </div>
         <div class="fn__flex" style="gap:8px;margin-bottom:8px">
           <div class="fn__flex" style="flex-direction:column;gap:4px"><span>翻译时忽略</span><div style="display:flex;gap:8px;flex-wrap:wrap;padding-top:4px">${[["table", "表格"], ["code", "代码"], ["figure", "图片"], ["reference", "文献"]].map(([value, label]) => `<label style="display:flex;align-items:center;gap:3px"><input type="checkbox" data-doc2x-ignore="${value}" ${(settings.doc2xIgnoreTypes || []).includes(value) ? "checked" : ""}/>${label}</label>`).join("")}</div></div>
+        </div>
+        <div class="fn__flex" style="gap:8px;margin-bottom:8px;align-items:flex-end">
+          <label class="fn__flex" style="flex-direction:column;gap:4px"><span>解析历史保留（条）</span><input class="b3-text-field" type="number" min="1" max="500" data-field="doc2xParseHistoryLimit" value="${settings.doc2xParseHistoryLimit || 50}" style="width:110px" /></label>
+          <label class="fn__flex" style="flex-direction:column;gap:4px"><span>最大缓存（MB）</span><input class="b3-text-field" type="number" min="0" max="102400" data-field="doc2xParseHistoryMaxMB" value="${settings.doc2xParseHistoryMaxMB || 2048}" style="width:130px" /></label>
+          <button class="b3-button b3-button--outline" data-act="doc2x-clear-parses" style="flex:0 0 auto">清理解析缓存</button>
+          <span class="pz-help" style="flex:1">解析结果与翻译 MD 保存在插件数据目录；超出上限自动清理最旧记录。</span>
         </div>
         <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><input type="checkbox" data-field="doc2xContextual" ${settings.doc2xContextual ? "checked" : ""}/> 上下文增强（会员）</label>
         <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><input type="checkbox" data-field="doc2xFontColor" ${settings.doc2xFontColor ? "checked" : ""}/> 保留原 PDF 字体颜色</label>
@@ -632,6 +639,8 @@ export function openSettings(host: PluginHost): void {
             doc2xTranslateType: fieldValue("doc2xTranslateType") === "md" ? "md" : "pdf",
             doc2xParseImageModel: fieldValue("doc2xParseImageModel") === "mathpix" ? "mathpix" : "doc2x",
             doc2xVisionModel: fieldValue("doc2xVisionModel"),
+            doc2xParseHistoryLimit: Math.max(1, Math.min(500, numberField("doc2xParseHistoryLimit", 50, 1, 500))),
+            doc2xParseHistoryMaxMB: Math.max(0, Math.min(102400, numberField("doc2xParseHistoryMaxMB", 2048, 0, 102400))),
             doc2xModel: fieldValue("doc2xModel"),
             doc2xTermId: fieldValue("doc2xTermId"),
             doc2xFontStrategy: fieldValue("doc2xFontStrategy") === "page-optimal" ? "page-optimal" : "global-consistent",
@@ -1009,6 +1018,17 @@ export function openSettings(host: PluginHost): void {
         applyDoc2xModels(list.models, list.terms);
         if (announce) doc2xEnv.textContent = `已读取 ${list.models.length} 个官方翻译模型、${list.terms.length} 个术语表。`;
     };
+    root.querySelector('[data-act="doc2x-clear-parses"]')?.addEventListener("click", () => {
+        const count = loadParseLibrary().length;
+        if (!count) {
+            showMessage("解析历史已经是空的", 2200);
+            return;
+        }
+        if (!window.confirm(`清空 ${count} 条解析结果及其图片缓存？（翻译 PDF 记录不受影响）`)) return;
+        clearParseLibrary();
+        showMessage("解析缓存已清理", 2200);
+        host.refreshDock();
+    });
     root.querySelector('[data-act="doc2x-refresh-models"]')?.addEventListener("click", () => {
         void refreshDoc2xModels(true).catch((error: any) => {
             doc2xEnv.textContent = `读取模型失败：${String(error?.message || error).slice(0, 200)}`;

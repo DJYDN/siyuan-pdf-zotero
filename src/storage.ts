@@ -123,6 +123,8 @@ export function defaultState(): PersistedState {
             doc2xTranslateType: "pdf",
             doc2xParseImageModel: "doc2x",
             doc2xVisionModel: "",
+            doc2xParseHistoryLimit: 50,
+            doc2xParseHistoryMaxMB: 2048,
             doc2xTermId: "",
             doc2xFontColor: false,
             doc2xFontStrategy: "global-consistent",

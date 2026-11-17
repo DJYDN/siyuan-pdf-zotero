@@ -16,7 +16,10 @@ import {openMatrix} from "./matrix-workspace";
 import {openTemplateManager} from "./template-manager";
 import {createNoteFromTemplate} from "../template/notes";
 import {syncTranslationHistory} from "../translation/history";
-import {openDoc2xErrorLogDir, runDoc2xMarkdownAction, runDoc2xPdfAction, type Doc2xTarget} from "./doc2x-actions";
+import {openDoc2xErrorLogDir, runDoc2xMarkdownAction, runDoc2xParseAction, runDoc2xPdfAction, type Doc2xTarget} from "./doc2x-actions";
+import {loadParseLibrary, readParseMarkdown, removeParseRecord, type ParseRecord} from "../doc2x/library";
+import {openParsePreview} from "./doc2x-preview";
+import {openParseTranslateDialog} from "./doc2x-translate-dialog";
 import {applyQaBlockTheme} from "../qa/theme";
 
 function escapeHtml(text: string): string {
@@ -131,10 +134,11 @@ function formatTime(ts: number): string {
 type DockView = "reading" | "recent" | "translations" | "zotero";
 const DOCK_VIEW_KEY = "pdf-zotero-dock-view";
 const storedDockView = localStorage.getItem(DOCK_VIEW_KEY);
-const dockFilter: {query: string; collection: string; page: number; view: DockView} = {
+const dockFilter: {query: string; collection: string; page: number; view: DockView; parseFilter: "all" | "parse" | "translate"} = {
     query: "",
     collection: "",
     page: 0,
+    parseFilter: "all",
     view: storedDockView === "recent" || storedDockView === "zotero" || storedDockView === "translations" ? storedDockView : "reading",
 };
 let dockSearchTimer = 0;
@@ -209,10 +213,17 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
     const readingItems = readingAttachments.map(item => attachmentCard(item, item.id === currentId)).join("");
     const recentItems = recentAttachments.slice(0, 20).map(item => attachmentCard(item, item.id === currentId)).join("");
     const translationOutputs = host.store.translationOutputs();
+    const parseRecords = loadParseLibrary();
+    const visibleParses = parseRecords.filter(item => dockFilter.parseFilter === "all" || item.kind === dockFilter.parseFilter);
     const translationItems = translationOutputs.map(item => `
-<button class="pz-list-item" data-translation-id="${escapeHtml(item.id)}" title="${escapeHtml(item.path)}">
+<button class="pz-list-item" data-translation-id="${escapeHtml(item.id)}" title="${escapeHtml(item.path)}" data-sort-at="${item.createdAt}" data-kind="translate">
   <div class="pz-item-title">${escapeHtml(item.sourceTitle || item.fileName)}</div>
-  <div class="pz-item-meta">${escapeHtml(item.provider === "doc2x" ? "Doc2X" : "PDF2zh")} · ${escapeHtml(item.mode)} · ${escapeHtml(formatTime(item.createdAt))}${item.sourceTitle ? "" : ` · ${escapeHtml(item.fileName)}`}</div>
+  <div class="pz-item-meta">翻译 · ${escapeHtml(item.provider === "doc2x" ? "Doc2X" : "PDF2zh")} · ${escapeHtml(item.mode)} · ${escapeHtml(formatTime(item.createdAt))}</div>
+</button>`).join("");
+    const parseItems = visibleParses.map(item => `
+<button class="pz-list-item" data-parse-id="${escapeHtml(item.id)}" title="${escapeHtml(item.mdPath)}" data-sort-at="${item.createdAt}" data-kind="${item.kind}">
+  <div class="pz-item-title">${item.kind === "translate" ? "译 · " : ""}${escapeHtml(item.sourceTitle || item.fingerprint)}</div>
+  <div class="pz-item-meta">${item.kind === "translate" ? "翻译 MD" : "解析 MD"} · ${escapeHtml(item.model || "doc2x")} · ${escapeHtml(formatTime(item.createdAt))} · ${item.imagesCount || 0} 图${item.version > 1 ? ` · v${item.version}` : ""}${item.noteDocId ? " · 已插入" : ""}</div>
 </button>`).join("");
 
     const translationsForAttachment = (attachmentId: string) => translationOutputs
@@ -244,8 +255,8 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
         const doc2x = host.store.state.settings;
         const docType = doc2x.doc2xTranslateType === "md";
         return [
-            {label: "翻译PDF为Md到笔记", disabled: !target, action: () => target ? runDoc2xMarkdownAction(host, target, "translate-md") : undefined},
-            {label: "解析PDF为Md到笔记", disabled: !target, action: () => target ? runDoc2xMarkdownAction(host, target, "parse-md") : undefined},
+            {label: "翻译解析结果…", disabled: !target, action: () => target ? runDoc2xMarkdownAction(host, target, "translate-md") : undefined},
+            {label: "解析 PDF 为 Markdown…", disabled: !target, action: () => target ? runDoc2xMarkdownAction(host, target, "parse-md") : undefined},
             {label: "保留排版翻译（纯译文）", disabled: !target, action: () => target ? runDoc2xPdfAction(host, target, "translatedPdf") : undefined},
             {label: docType ? "双语对照+文档型翻译（插入笔记）" : "双语对照+排版翻译（Pro）", disabled: !target, action: () => target ? runDoc2xPdfAction(host, target, "dualPdf") : undefined},
             {label: "Doc2x:打开报错日志目录", action: () => openDoc2xErrorLogDir(host)},
@@ -300,7 +311,7 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
 <div class="pz-dock-tabs" role="tablist" aria-label="PDF 与 Zotero 视图">
   <button role="tab" data-view="reading" class="${dockFilter.view === "reading" ? "is-active" : ""}">阅读中 <span>${readingAttachments.length}</span></button>
   <button role="tab" data-view="recent" class="${dockFilter.view === "recent" ? "is-active" : ""}">最近 <span>${recentAttachments.length}</span></button>
-  <button role="tab" data-view="translations" class="${dockFilter.view === "translations" ? "is-active" : ""}">译文 <span>${translationOutputs.length}</span></button>
+  <button role="tab" data-view="translations" class="${dockFilter.view === "translations" ? "is-active" : ""}">解析翻译 <span>${parseRecords.length + translationOutputs.length}</span></button>
   <button role="tab" data-view="zotero" class="${dockFilter.view === "zotero" ? "is-active" : ""}">Zotero <span>${cache.items.length}</span></button>
 </div>`;
 
@@ -312,9 +323,34 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
   <div class="pz-view-heading"><div><strong>最近打开</strong><small>最多显示 20 篇</small></div><button data-act="open-local">＋ 打开 PDF</button></div>
   <div class="pz-list">${recentItems || `<div class="pz-dock-empty"><strong>暂无历史记录</strong><span>打开过的 PDF 会按时间排列在这里。</span></div>`}</div>
 </section>`;
+    const mergedItems = [
+        ...Array.from(parseItems ? [parseItems] : []),
+    ];
+    const orderedItems = (() => {
+        const rows: Array<{at: number; html: string}> = [];
+        for (const item of visibleParses) {
+            const at = item.createdAt;
+            rows.push({at, html: `<button class="pz-list-item" data-parse-id="${escapeHtml(item.id)}" title="${escapeHtml(item.mdPath)}">
+  <div class="pz-item-title">${item.kind === "translate" ? "译 · " : ""}${escapeHtml(item.sourceTitle || item.fingerprint)}</div>
+  <div class="pz-item-meta">${item.kind === "translate" ? "翻译 MD" : "解析 MD"} · ${escapeHtml(item.model || "doc2x")} · ${escapeHtml(formatTime(item.createdAt))} · ${item.imagesCount || 0} 图${item.version > 1 ? ` · v${item.version}` : ""}${item.noteDocId ? " · 已插入" : ""}</div>
+</button>`});
+        }
+        for (const item of translationOutputs) {
+            rows.push({at: item.createdAt, html: `<button class="pz-list-item" data-translation-id="${escapeHtml(item.id)}" title="${escapeHtml(item.path)}">
+  <div class="pz-item-title">${escapeHtml(item.sourceTitle || item.fileName)}</div>
+  <div class="pz-item-meta">翻译 · ${escapeHtml(item.provider === "doc2x" ? "Doc2X" : "PDF2zh")} · ${escapeHtml(item.mode)} · ${escapeHtml(formatTime(item.createdAt))}</div>
+</button>`});
+        }
+        return rows.sort((a, b) => b.at - a.at).map(row => row.html).join("");
+    })();
     const translationsView = `<section class="pz-dock-view">
-  <div class="pz-view-heading"><div><strong>译文历史</strong><small>${translationOutputs.length} 个翻译 PDF</small></div><div class="pz-view-heading-actions"><button data-act="open-translations-dir">打开目录</button><button data-act="clear-translations">清空记录</button></div></div>
-  <div class="pz-list">${translationItems || `<div class="pz-dock-empty"><strong>还没有译文</strong><span>在 PDF 顶部使用整篇翻译后，生成的 PDF 会显示在这里。</span></div>`}</div>
+  <div class="pz-view-heading"><div><strong>解析与翻译</strong><small>${parseRecords.length} 个解析 MD · ${translationOutputs.length} 个翻译结果</small></div><div class="pz-view-heading-actions"><button data-act="open-translations-dir">打开目录</button><button data-act="clear-translations">清空记录</button></div></div>
+  <div class="pz-dock-filters" style="margin-bottom:6px"><select class="b3-select fn__block" data-role="parse-filter">
+    <option value="all" ${dockFilter.parseFilter === "all" ? "selected" : ""}>全部（解析 + 翻译）</option>
+    <option value="parse" ${dockFilter.parseFilter === "parse" ? "selected" : ""}>仅解析结果</option>
+    <option value="translate" ${dockFilter.parseFilter === "translate" ? "selected" : ""}>仅翻译结果</option>
+  </select></div>
+  <div class="pz-list">${orderedItems || `<div class="pz-dock-empty"><strong>还没有解析或翻译结果</strong><span>在 PDF 菜单里使用「解析 PDF 为 Markdown」或「翻译 PDF 为 Markdown」后，结果显示在这里。</span></div>`}</div>
 </section>`;
     const zoteroView = `<section class="pz-dock-view">
   <div class="pz-view-heading"><div><strong>Zotero 文献</strong><small>${filteredItems.length} 条匹配结果</small></div><button data-act="refresh-zotero">刷新</button></div>
@@ -360,6 +396,11 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
         dockFilter.page = 0;
         host.refreshDock();
     });
+    element.querySelector<HTMLSelectElement>('[data-role="parse-filter"]')?.addEventListener("change", (event) => {
+        const value = (event.target as HTMLSelectElement).value;
+        dockFilter.parseFilter = value === "parse" || value === "translate" ? value : "all";
+        host.refreshDock();
+    });
     element.addEventListener("dragstart", (event) => {
         const target = (event.target as HTMLElement).closest<HTMLElement>("[data-zotero-key],[data-attachment-id]");
         if (!target || !event.dataTransfer) return;
@@ -367,7 +408,7 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
         else if (target.dataset.attachmentId) event.dataTransfer.setData("text/plain", `pz-pdf:${target.dataset.attachmentId}`);
     });
     element.onclick = async (event) => {
-        const target = (event.target as HTMLElement).closest<HTMLElement>("[data-act],[data-view],[data-zotero-key],[data-attachment-id],[data-translation-id]");
+        const target = (event.target as HTMLElement).closest<HTMLElement>("[data-act],[data-view],[data-zotero-key],[data-attachment-id],[data-translation-id],[data-parse-id]");
         if (!target) {
             return;
         }
@@ -387,9 +428,10 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
             } else if (action === "open-translations-dir") {
                 electron?.shell?.openPath?.(translationOutputDir(host.store.state.settings));
             } else if (action === "clear-translations") {
-                if (!translationOutputs.length) return;
-                if (!window.confirm("清空全部翻译历史记录？不会删除实际 PDF 文件。")) return;
+                if (!translationOutputs.length && !loadParseLibrary().length) return;
+                if (!window.confirm("清空全部解析与翻译记录？解析结果及其图片缓存会被删除，翻译 PDF 文件不会被删除。")) return;
                 for (const output of translationOutputs) host.store.removeTranslationOutput(output.id);
+                for (const record of loadParseLibrary()) removeParseRecord(record.id, true);
                 void host.store.save();
                 host.refreshDock();
             } else if (action === "open-template-manager") {
@@ -417,6 +459,9 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
                 if (attachment) {
                     host.openAttachment(attachment);
                 }
+            } else if (target.dataset.parseId) {
+                const record = parseRecords.find(item => item.id === target.dataset.parseId);
+                if (record) openParsePreview(host, record);
             } else if (target.dataset.translationId) {
                 const output = host.store.state.translationOutputs[target.dataset.translationId];
                 if (!output) return;
@@ -435,10 +480,28 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
     };
 
     const onDockContextMenu = (event: MouseEvent) => {
-        const target = (event.target as HTMLElement).closest<HTMLElement>("[data-zotero-key],[data-attachment-id],[data-translation-id]");
+        const target = (event.target as HTMLElement).closest<HTMLElement>("[data-zotero-key],[data-attachment-id],[data-translation-id],[data-parse-id]");
         if (!target) return;
         event.preventDefault();
         event.stopPropagation();
+        if (target.dataset.parseId) {
+            const record = parseRecords.find(item => item.id === target.dataset.parseId);
+            if (!record) return;
+            const attachment = record.sourceAttachmentId ? host.store.getAttachment(record.sourceAttachmentId) : undefined;
+            showDockContextMenu(event.clientX, event.clientY, [
+                {label: "预览 / 插入", action: () => openParsePreview(host, record)},
+                {label: "翻译…", action: () => openParseTranslateDialog(host, record)},
+                {label: "打开 Markdown 所在位置", action: () => revealPath(record.mdPath)},
+                {label: "复制 Markdown 路径", action: () => void navigator.clipboard?.writeText(record.mdPath).then(() => showMessage("已复制路径", 1500))},
+                {label: "定位原 PDF", action: () => attachment ? host.openAttachment(attachment) : revealPath(record.sourcePdfPath)},
+                {label: "删除解析结果", action: () => {
+                    if (!window.confirm("删除这条解析结果及其图片缓存？")) return;
+                    removeParseRecord(record.id, true);
+                    host.refreshDock();
+                }},
+            ]);
+            return;
+        }
         if (target.dataset.translationId) {
             const output = host.store.state.translationOutputs[target.dataset.translationId];
             if (!output) return;
