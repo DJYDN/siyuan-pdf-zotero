@@ -24,7 +24,9 @@ function cleanOptionsHtml(options: CleanOptions): string {
 }
 
 export function openParsePreview(host: PluginHost, record: ParseRecord): Dialog {
-    const raw = readParseMarkdown(record, true) || readParseMarkdown(record);
+    // Base the preview on the cleaned/stored Markdown (images already point at SiYuan assets);
+    // raw.md is kept on disk only as a manual recovery source.
+    const raw = readParseMarkdown(record) || readParseMarkdown(record, true);
     const dialog = new Dialog({
         title: `解析结果预览 · ${record.sourceTitle || record.fingerprint}`,
         width: "980px",
