@@ -24,7 +24,7 @@ import time
 sys.stdout.reconfigure(encoding="utf-8")
 
 ROOT = r"F:\study\VStudio\SiYuanArticleManger"
-SRC_MODEL_DIR = os.path.join(ROOT, "release", "UniMERNet-Portable", "src", "UniMERNet-main", "models", "unimernet_base")
+SRC_MODEL_DIR = os.path.join(ROOT, ".tmp", "release-src", "UniMERNet-Portable", "src", "UniMERNet-main", "models", "unimernet_base")
 CKPT = os.path.join(SRC_MODEL_DIR, "unimernet_base.pth")
 OUT_DIR = os.path.join(ROOT, "release", "OCR-UniMERNet-Portable", "models", "unimernet_base")
 

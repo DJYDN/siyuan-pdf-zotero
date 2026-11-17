@@ -4,6 +4,7 @@ import {
     engineConfig,
     enginesForMode,
     OCR_ENGINE_DEFS,
+    OCR_ENGINE_IDS,
     serviceGroupForEngine,
     serviceGroups,
     type OcrServiceGroup,
@@ -87,6 +88,20 @@ function pythonCandidates(settings: Settings, dir: string): string[] {
     return candidates;
 }
 
+function resolveScriptInDir(dir: string, candidates: string[]): string {
+    const path = requireNode("path");
+    if (!path?.join) {
+        return "";
+    }
+    for (const script of candidates) {
+        const candidate = path.join(dir, script);
+        if (fileExists(candidate)) {
+            return candidate;
+        }
+    }
+    return "";
+}
+
 function resolveScript(group: OcrServiceGroup): string {
     const path = requireNode("path");
     if (!path?.join) {
@@ -111,9 +126,19 @@ function resolveScript(group: OcrServiceGroup): string {
 }
 
 export function resolveServicePaths(settings: Settings, engine: OcrEngineId): OcrServicePaths {
+    const config = engineConfig(settings, engine);
     const group = serviceGroupForEngine(settings, engine);
     if (!group) {
-        return {dir: "", python: "", script: "", port: engineConfig(settings, engine).port};
+        // Disabled engines are not part of any service group, but the settings page must
+        // still be able to inspect their directory/script/runtime before enabling them.
+        const dir = config.dir.trim();
+        if (!dir) {
+            return {dir: "", python: "", script: "", port: config.port};
+        }
+        const python = pythonCandidates(settings, dir).find(fileExists) || "";
+        const script = resolveScriptInDir(dir, OCR_ENGINE_DEFS[engine].scriptCandidates)
+            || (engine !== "texo" ? resolveScriptInDir(dir, ["pz_ocr_server.py"]) : "");
+        return {dir, python, script, port: config.port};
     }
     const python = pythonCandidates(settings, group.dir).find(fileExists) || "";
     return {dir: group.dir, python, script: resolveScript(group), port: group.port};
@@ -181,7 +206,11 @@ export async function checkOcrEngineEnvironment(settings: Settings, engine: OcrE
 }
 
 export async function checkOcrEnvironment(settings: Settings): Promise<OcrEnvironmentCheck> {
-    const engines = serviceGroups(settings).flatMap(group => group.engines);
+    const configured = (OCR_ENGINE_IDS as OcrEngineId[]).filter((id: OcrEngineId) => {
+        const config = engineConfig(settings, id);
+        return config.enabled || Boolean(config.dir.trim());
+    });
+    const engines = configured.length ? configured : serviceGroups(settings).flatMap(group => group.engines);
     const results: OcrEngineEnvironmentCheck[] = [];
     for (const engine of engines) {
         results.push(await checkOcrEngineEnvironment(settings, engine));

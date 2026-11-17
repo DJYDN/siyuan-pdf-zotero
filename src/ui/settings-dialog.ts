@@ -837,7 +837,7 @@ export function openSettings(host: PluginHost): void {
     root.querySelector('[data-act="ocr-check"]')?.addEventListener("click", async () => {
         ocrEnv.textContent = "检测中…";
         let result = await checkOcrEnvironment(probeSettings());
-        const notRunning = result.engines.filter(item => !item.health?.ok && item.script && item.python);
+        const notRunning = result.engines.filter(item => !item.health?.ok && item.script && item.python && readEngineConfig(item.engine).enabled);
         for (const engineResult of notRunning) {
             ocrEnv.textContent = `正在启动 ${OCR_ENGINE_DEFS[engineResult.engine].name}…`;
             setStatus(engineResult.engine, "启动中…", "warn");
