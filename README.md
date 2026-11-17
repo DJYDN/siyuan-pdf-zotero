@@ -10,7 +10,7 @@
 
 本地优先：不修改原始 PDF、不写 Zotero 数据库、OCR 与翻译服务全部跑在本机。
 
-当前版本：**v0.9.59** · [统一发布页](https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/v0.9.59)
+当前版本：**v0.9.60** · [统一发布页](https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/v0.9.60)
 
 ---
 
@@ -97,7 +97,7 @@ Texo / UniMERNet / Pix2Text 三引擎独立服务，可单独启停；公式优�
 ### 1. 插件本体
 
 1. 安装思源桌面版 **3.8.7+**；
-2. `设置 → 集市 → 已下载 → 安装本地插件`，选择 `siyuan-pdf-zotero-0.9.59.zip`；
+2. `设置 → 集市 → 已下载 → 安装本地插件`，选择 `siyuan-pdf-zotero-0.9.60.zip`；
    - 压缩包已按思源插件规范打包：`plugin.json`、`index.js`、`i18n/`、`styles/` 等直接位于 zip 根目录，**没有嵌套文件夹**；
 3. 启用插件，右侧栏会出现 **PDF × Zotero** Dock，顶栏出现打开 PDF 的图标。
 
@@ -235,7 +235,7 @@ Texo / UniMERNet / Pix2Text 三引擎独立服务，可单独启停；公式优�
 
 ## 从 v0.9.56 以来的主要变化
 
-> 完整清单见 [CHANGELOG.md](CHANGELOG.md)，发布说明见 [release-notes/v0.9.59.md](release-notes/v0.9.59.md)。
+> 完整清单见 [CHANGELOG.md](CHANGELOG.md)，发布说明见 [release-notes/v0.9.60.md](release-notes/v0.9.60.md)。
 
 - OCR 从单服务升级为 **Pix2Text / UniMERNet / Texo 三引擎独立服务**，新增 Texo 与 UniMERNet/Pix2Text 独立便携包；
 - OCR 结果弹窗重做为 Texo 风格（源码/渲染同屏、KaTeX/MathLive 切换、10 种复制格式、自动复制、换图重识别、示例图）；
@@ -296,7 +296,7 @@ node scripts\install-plugin.mjs --workspace "C:\Users\Asus\SiYuan\Dataset"
 ```text
 TypeScript：0 errors
 Node tests：136 个（1 个跳过）
-插件版本：0.9.59
+插件版本：0.9.60
 ```
 
 ## 安全边界
@@ -309,7 +309,7 @@ Node tests：136 个（1 个跳过）
 
 ## 版本与发布
 
-- 统一发布页：https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/v0.9.59
+- 统一发布页：https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/v0.9.60
 - 版本说明：[`RELEASE_TAGS.md`](RELEASE_TAGS.md)
 - 变更日志：[`CHANGELOG.md`](CHANGELOG.md)
 

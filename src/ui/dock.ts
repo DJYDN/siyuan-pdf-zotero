@@ -350,9 +350,19 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
   </select></div>
   <div class="pz-list">${orderedItems || `<div class="pz-dock-empty"><strong>还没有解析或翻译结果</strong><span>在 PDF 菜单里使用「解析 PDF 为 Markdown」或「翻译 PDF 为 Markdown」后，结果显示在这里。</span></div>`}</div>
 </section>`;
+    const offlineSuffix = cache.lastError && hasZoteroCache ? " · 当前离线" : "";
+    const syncLabel = cache.updatedAt ? `${formatTime(cache.updatedAt)} 同步` : "";
+    const summaryParts = [
+        hasZoteroCache ? `${filteredItems.length} 条` : "未连接",
+        hasZoteroCache ? `${cache.items.length} 条缓存` : "",
+        hasZoteroCache ? `${cache.attachments?.length || 0} PDF` : "",
+        syncLabel,
+    ].filter(Boolean);
+    const zoteroSummaryTitle = hasZoteroCache
+        ? `${cachedStatus}${offlineSuffix}`
+        : (cache.lastError ? `Zotero Local API 不可用：${cache.lastError}` : "尚未读取 Zotero，请点击刷新");
     const zoteroView = `<section class="pz-dock-view">
-  <div class="pz-view-heading"><div><strong>Zotero 文献</strong><small>${filteredItems.length} 条匹配结果</small></div><button data-act="refresh-zotero">刷新</button></div>
-  <div class="pz-status ${statusClass}">${zoteroStatus}</div>
+  <div class="pz-view-heading"><div class="pz-zotero-summary" title="${escapeHtml(zoteroSummaryTitle)}"><strong>Zotero 文献</strong><span class="pz-muted">· ${escapeHtml(summaryParts.join(" · "))}${offlineSuffix}</span></div><button data-act="refresh-zotero">刷新</button></div>
   <div class="pz-dock-filters">
     <input class="b3-text-field fn__block" data-role="zotero-search" placeholder="搜索标题、作者、年份或 DOI" value="${escapeHtml(dockFilter.query)}" />
     <select class="b3-select fn__block" data-role="zotero-collection">${collectionOptions}</select>

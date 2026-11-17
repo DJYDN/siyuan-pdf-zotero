@@ -23,6 +23,7 @@ export class ScreenshotTool {
     setActive(active: boolean): void {
         this.active = active;
         this.pagesElement.classList.toggle("pz-shot-mode", active);
+        document.body.classList.toggle("pz-shot-cursor", active);
         if (!active) {
             this.cleanup();
         }

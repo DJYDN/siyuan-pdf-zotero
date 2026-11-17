@@ -23,6 +23,7 @@ export class RectSelectTool {
     setActive(active: boolean): void {
         this.active = active;
         this.pagesElement.classList.toggle("pz-rect-mode", active);
+        document.body.classList.toggle("pz-rect-cursor", active);
         if (!active) {
             this.cleanup();
         }
