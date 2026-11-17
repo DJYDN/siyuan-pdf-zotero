@@ -1,4 +1,4 @@
-import {Dialog, showMessage} from "siyuan";
+import {Dialog, getActiveEditor, showMessage} from "siyuan";
 import type {PluginHost} from "../host";
 import {createDocWithMd, listNotebooks} from "../api";
 import {insertMarkdownAtCursor} from "../siyuan";
@@ -63,7 +63,7 @@ export function openParsePreview(host: PluginHost, record: ParseRecord): Dialog 
     const apply = (): void => {
         const result = cleanDoc2xMarkdown(raw, options);
         currentMarkdown = result.markdown;
-        rendered.innerHTML = renderQaMarkdown(markdownForPreview(result.markdown));
+        rendered.innerHTML = renderQaMarkdown(result.markdown).replace(/(<img[^>]*?src=")(?:\.\/)?assets\//g, "$1/assets/");
         source.textContent = result.markdown;
         warnings.textContent = result.warnings.join(" ");
         meta.textContent = `${result.markdown.length} 字符 · ${result.markdown.split("\n").length} 行`;
@@ -150,4 +150,55 @@ async function openNewDocDialog(host: PluginHost, record: ParseRecord, markdown:
             showMessage(`新建文档失败：${String(error?.message || error).slice(0, 160)}`, 5000, "error");
         }
     });
+}
+
+
+/**
+ * Open a parsed Markdown result as a real SiYuan document so it reads and renders
+ * exactly like a note (images, KaTeX, tables all use the kernel renderer).
+ */
+export async function openParseAsDocument(host: PluginHost, record: ParseRecord): Promise<void> {
+    if (record.noteDocId) {
+        try {
+            host.openDoc(record.noteDocId);
+            return;
+        } catch {
+            // doc may have been deleted; create a fresh one below
+        }
+    }
+    const notebooks = await listNotebooks().catch((): any[] => []);
+    if (!notebooks.length) {
+        showMessage("没有可用的笔记本，无法打开解析结果", 4000, "error");
+        return;
+    }
+    const activeEditor = getActiveEditor();
+    const activeNotebook = String(activeEditor?.protyle?.notebookId || "");
+    const notebook = notebooks.find(item => item.id === activeNotebook)?.id
+        || notebooks.find(item => !item.closed)?.id
+        || notebooks[0].id;
+    const baseTitle = (record.sourceTitle || "Doc2X 解析结果").replace(/[\\/:*?"<>|]/g, " ").trim().slice(0, 80) || "Doc2X 解析结果";
+    const markdown = readParseMarkdown(record);
+    if (!markdown) {
+        showMessage("解析结果文件不存在，请重新解析", 4000, "error");
+        return;
+    }
+    const candidates = [`/${baseTitle}`, `/${baseTitle}（解析）`, `/${baseTitle}（解析 ${new Date().toLocaleString()}）`];
+    let docId = "";
+    let lastError: any = null;
+    for (const docPath of candidates) {
+        try {
+            docId = await createDocWithMd(notebook, docPath, markdown);
+            if (docId) break;
+        } catch (error) {
+            lastError = error;
+        }
+    }
+    if (!docId) {
+        showMessage(`打开文档失败：${String(lastError?.message || lastError || "未知错误").slice(0, 160)}`, 5000, "error");
+        return;
+    }
+    updateParseRecord(record.id, {noteDocId: docId});
+    host.openDoc(docId);
+    showMessage("已作为笔记文档打开", 2000);
+    host.refreshDock();
 }

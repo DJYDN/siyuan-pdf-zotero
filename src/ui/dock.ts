@@ -18,7 +18,7 @@ import {createNoteFromTemplate} from "../template/notes";
 import {syncTranslationHistory} from "../translation/history";
 import {openDoc2xErrorLogDir, runDoc2xMarkdownAction, runDoc2xParseAction, runDoc2xPdfAction, type Doc2xTarget} from "./doc2x-actions";
 import {loadParseLibrary, readParseMarkdown, removeParseRecord, type ParseRecord} from "../doc2x/library";
-import {openParsePreview} from "./doc2x-preview";
+import {openParseAsDocument, openParsePreview} from "./doc2x-preview";
 import {openParseTranslateDialog} from "./doc2x-translate-dialog";
 import {applyQaBlockTheme} from "../qa/theme";
 
@@ -462,7 +462,7 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
                 }
             } else if (target.dataset.parseId) {
                 const record = parseRecords.find(item => item.id === target.dataset.parseId);
-                if (record) openParsePreview(host, record);
+                if (record) await openParseAsDocument(host, record);
             } else if (target.dataset.translationId) {
                 const output = host.store.state.translationOutputs[target.dataset.translationId];
                 if (!output) return;
@@ -490,7 +490,8 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
             if (!record) return;
             const attachment = record.sourceAttachmentId ? host.store.getAttachment(record.sourceAttachmentId) : undefined;
             showDockContextMenu(event.clientX, event.clientY, [
-                {label: "预览 / 插入", action: () => openParsePreview(host, record)},
+                {label: "以笔记文档打开", action: () => void openParseAsDocument(host, record)},
+                {label: "预览 / 插入…", action: () => openParsePreview(host, record)},
                 {label: "翻译…", action: () => openParseTranslateDialog(host, record)},
                 {label: "打开 Markdown 所在位置", action: () => revealPath(record.mdPath)},
                 {label: "复制 Markdown 路径", action: () => void navigator.clipboard?.writeText(record.mdPath).then(() => showMessage("已复制路径", 1500))},
