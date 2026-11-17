@@ -171,7 +171,8 @@ Texo / UniMERNet / Pix2Text 三引擎独立服务，可单独启停；公式优�
 
 **整篇 PDF 翻译**
 - PDF2zh 本地服务（双语对照 / 纯译文，左右/上下对照，源语言可选）；
-- Doc2X 个人账号（双栏双语 / 纯译文重排、术语表、字体策略、忽略表格/代码/图片/文献、上下文增强、保留原字色）；
+- Doc2X 个人账号：模型下拉实时读取 `doc2x models list`（仅当前账号可用模型）；输出可选纯译文 / 对照翻译，对照翻译再选固定排版双栏 PDF 或文档型 Markdown；支持术语表、字体策略、忽略表格/代码/图片/文献、上下文增强、保留原字色；
+- Doc2X PDF→Markdown：解析模型（doc2x / mathpix 图片模型 + 官方视觉模型）与翻译模型都可配置，Dock 菜单可直接解析或翻译为 Markdown 插入笔记；
 - 译文输出目录、译文历史、打开译文/原文/所在目录、删除/清空记录；
 - 翻译期间进度 HUD 显示进度与日志，**ESC 可退出等待**。
 
@@ -291,7 +292,7 @@ node scripts\install-plugin.mjs --workspace "C:\Users\Asus\SiYuan\Dataset"
 
 ```text
 TypeScript：0 errors
-Node tests：126/126 pass
+Node tests：127/127 pass
 插件版本：0.9.58
 ```
 

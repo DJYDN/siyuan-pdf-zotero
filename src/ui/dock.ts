@@ -240,13 +240,17 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
             filename: cached.filename,
         });
     };
-    const doc2xMenuItems = (target: Doc2xTarget | null): DockMenuItem[] => [
-        {label: "翻译PDF为Md到笔记", disabled: !target, action: () => target ? runDoc2xMarkdownAction(host, target, "translate-md") : undefined},
-        {label: "解析PDF为Md到笔记", disabled: !target, action: () => target ? runDoc2xMarkdownAction(host, target, "parse-md") : undefined},
-        {label: "保留排版翻译", disabled: !target, action: () => target ? runDoc2xPdfAction(host, target, "translatedPdf") : undefined},
-        {label: "双语对照+排版翻译(Pro专属)", disabled: !target, action: () => target ? runDoc2xPdfAction(host, target, "dualPdf") : undefined},
-        {label: "Doc2x:打开报错日志目录", action: () => openDoc2xErrorLogDir(host)},
-    ];
+    const doc2xMenuItems = (target: Doc2xTarget | null): DockMenuItem[] => {
+        const doc2x = host.store.state.settings;
+        const docType = doc2x.doc2xTranslateType === "md";
+        return [
+            {label: "翻译PDF为Md到笔记", disabled: !target, action: () => target ? runDoc2xMarkdownAction(host, target, "translate-md") : undefined},
+            {label: "解析PDF为Md到笔记", disabled: !target, action: () => target ? runDoc2xMarkdownAction(host, target, "parse-md") : undefined},
+            {label: "保留排版翻译（纯译文）", disabled: !target, action: () => target ? runDoc2xPdfAction(host, target, "translatedPdf") : undefined},
+            {label: docType ? "双语对照+文档型翻译（插入笔记）" : "双语对照+排版翻译（Pro）", disabled: !target, action: () => target ? runDoc2xPdfAction(host, target, "dualPdf") : undefined},
+            {label: "Doc2x:打开报错日志目录", action: () => openDoc2xErrorLogDir(host)},
+        ];
+    };
     const doc2xTargetForAttachment = (attachment: any): Doc2xTarget => ({
         id: attachment.id,
         path: attachment.path,

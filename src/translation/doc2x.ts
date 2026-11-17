@@ -178,6 +178,37 @@ export interface Doc2xTranslateResult {
     stderr: string;
 }
 
+export interface Doc2xModelList {
+    models: any[];
+    terms: any[];
+}
+
+function parseModelList(payload: any): any[] {
+    const value = Array.isArray(payload) ? payload : (Array.isArray(payload?.models) ? payload.models : []);
+    return value.filter((item: any) => item && (item.modelId != null || item.id != null || item.name != null));
+}
+
+/** Reads the account's real Doc2X model + term lists (used by the settings dropdowns). */
+export async function fetchDoc2xModelList(settings: Settings): Promise<Doc2xModelList> {
+    const command = resolveCommand(settings.doc2xCommand || "doc2x");
+    const modelsResult = await run(command, ["models", "list", ...baseArgs(settings), "--json"], 25_000);
+    const termsResult = await run(command, ["term", "list", ...baseArgs(settings), "--json"], 25_000);
+    const models = parseModelList(parseJson(modelsResult.stdout));
+    const termsPayload = parseJson(termsResult.stdout);
+    const terms = Array.isArray(termsPayload) ? termsPayload : (Array.isArray(termsPayload?.terms) ? termsPayload.terms : []);
+    return {models, terms};
+}
+
+function doc2xParseArgs(settings: Settings): string[] {
+    const args: string[] = [];
+    const imageModel = settings.doc2xParseImageModel === "mathpix" ? "mathpix" : "doc2x";
+    args.push("--image-models", imageModel);
+    if (settings.doc2xVisionModel?.trim()) {
+        args.push("--vision-models", settings.doc2xVisionModel.trim());
+    }
+    return args;
+}
+
 export async function translateWithDoc2x(
     settings: Settings,
     inputPath: string,
@@ -201,6 +232,7 @@ export async function translateWithDoc2x(
     } else {
         args.push("--translate-type", "pdf", "--convert-trans", "both");
     }
+    args.push(...doc2xParseArgs(settings));
     if (settings.doc2xModel.trim()) {
         args.push("--target-model", settings.doc2xModel.trim());
     }
@@ -327,6 +359,7 @@ export async function parseWithDoc2x(
         "--out", outputDir,
         "--json",
         "--overwrite",
+        ...doc2xParseArgs(settings),
     ];
     const command = `parse ${inputPath}`;
     const result = await run(resolveCommand(settings.doc2xCommand || "doc2x"), args, 45 * 60_000);
@@ -352,6 +385,7 @@ export async function translateWithDoc2xMarkdown(
         "translate",
         inputPath,
         ...doc2xCommonArgs(settings),
+        ...doc2xParseArgs(settings),
         "--target-language", settings.doc2xTargetLang || "zh",
         "--translate-type", "md",
         "--to", "md",

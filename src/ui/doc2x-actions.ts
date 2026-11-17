@@ -65,9 +65,10 @@ export async function runDoc2xMarkdownAction(
     hud.setIndeterminate(kind === "parse-md" ? "正在解析 PDF 为 Markdown…" : "正在翻译 PDF 为 Markdown…");
     try {
         const outputDir = doc2xActionOutputDir(settings, target.id, target.fingerprint, kind);
+        const convert = kind === "translate-md" && settings.doc2xOutputMode === "dualPdf" && settings.doc2xTranslateType === "md" ? "both" : "translate";
         const result = kind === "parse-md"
             ? await parseWithDoc2x(settings, target.path, outputDir)
-            : await translateWithDoc2xMarkdown(settings, target.path, outputDir, "translate");
+            : await translateWithDoc2xMarkdown(settings, target.path, outputDir, convert);
         const markdown = result.markdownFiles[0];
         if (!markdown) throw new Error("Doc2X 没有返回 Markdown 文件");
         hud.setStatus("正在插入笔记…");
@@ -85,6 +86,10 @@ export async function runDoc2xPdfAction(
 ): Promise<void> {
     const settings = requireConfigured(host);
     if (!settings) return;
+    if (mode === "dualPdf" && settings.doc2xTranslateType === "md") {
+        await runDoc2xMarkdownAction(host, target, "translate-md");
+        return;
+    }
     const hud = new Pdf2zhHud("Doc2X");
     hud.setIndeterminate(mode === "dualPdf" ? "正在生成双语排版 PDF…" : "正在生成译文 PDF…");
     try {

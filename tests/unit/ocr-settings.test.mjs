@@ -195,6 +195,42 @@ test("engine directory changes are staged until the apply button is used", async
     closeDialog(dialog);
 });
 
+test("Doc2X output controls reveal translation type only for dual output", () => {
+    const host = makeHost();
+    const dialog = openDialog(host);
+    const output = dialog.querySelector('[data-field="doc2xOutputMode"]');
+    const dualRow = dialog.querySelector('[data-role="doc2x-dual-row"]');
+    const type = dialog.querySelector('[data-field="doc2xTranslateType"]');
+    const fontRow = dialog.querySelector('[data-role="doc2x-font-row"]');
+    assert.ok(output && dualRow && type, "Doc2X output controls exist");
+    assert.ok(dialog.querySelector('[data-field="doc2xModel"]'), "translation model select exists");
+    assert.ok(dialog.querySelector('[data-field="doc2xVisionModel"]'), "vision model select exists");
+    assert.ok(dialog.querySelector('[data-field="doc2xParseImageModel"]'), "image OCR model select exists");
+    assert.equal(dualRow.hidden, false, "translation type visible for dual output by default");
+
+    output.value = "translatedPdf";
+    output.dispatchEvent(new win.Event("change", {bubbles: true}));
+    assert.equal(dualRow.hidden, true, "translation type hidden for pure translation");
+
+    output.value = "dualPdf";
+    output.dispatchEvent(new win.Event("change", {bubbles: true}));
+    assert.equal(dualRow.hidden, false, "translation type visible again");
+
+    type.value = "md";
+    type.dispatchEvent(new win.Event("change", {bubbles: true}));
+    assert.equal(fontRow.hidden, true, "PDF font strategy hidden for document-type output");
+
+    const pdf2zhOutput = dialog.querySelector('[data-field="pdf2zhOutputMode"]');
+    const direction = dialog.querySelector('[data-role="pdf2zh-dual-row"]');
+    pdf2zhOutput.value = "mono";
+    pdf2zhOutput.dispatchEvent(new win.Event("change", {bubbles: true}));
+    assert.equal(direction.hidden, true, "PDF2zh direction hidden for pure translation");
+    pdf2zhOutput.value = "dual";
+    pdf2zhOutput.dispatchEvent(new win.Event("change", {bubbles: true}));
+    assert.equal(direction.hidden, false, "PDF2zh direction visible for dual output");
+    closeDialog(dialog);
+});
+
 test("translation service subtab lists services with edit and test actions", () => {
     const host = makeHost();
     const dialog = openDialog(host);

@@ -230,7 +230,14 @@ export interface Settings {
     doc2xConfigured: boolean;
     doc2xTargetLang: string;
     doc2xModel: string;
+    /** dualPdf = 对照翻译, translatedPdf = 纯译文（重排）。 */
     doc2xOutputMode: "dualPdf" | "translatedPdf";
+    /** 对照翻译的类型：md = 文档型（Markdown），pdf = 固定排版双栏 PDF。 */
+    doc2xTranslateType: "md" | "pdf";
+    /** PDF 解析使用的图片 OCR 模型。 */
+    doc2xParseImageModel: "doc2x" | "mathpix";
+    /** PDF 解析使用的视觉模型 ID（来自 doc2x models list）。 */
+    doc2xVisionModel: string;
     doc2xTermId: string;
     doc2xFontColor: boolean;
     doc2xFontStrategy: "global-consistent" | "page-optimal";

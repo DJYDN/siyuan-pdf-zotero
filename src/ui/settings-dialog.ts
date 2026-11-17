@@ -6,7 +6,7 @@ import {citationStyleOptions, openCitationStylePicker} from "./style-picker";
 import {TRANSLATION_SERVICE_TYPES, defaultTranslationServices} from "../translation/defaults";
 import {TRANSLATION_TARGETS, translateText} from "../translation/service";
 import {checkPdf2zhEnvironment, ensurePdf2zhServer} from "../translation/pdf2zh";
-import {checkDoc2xEnvironment} from "../translation/doc2x";
+import {checkDoc2xEnvironment, fetchDoc2xModelList} from "../translation/doc2x";
 import {checkOcrEngineEnvironment, checkOcrEnvironment, ensureOcrEngine, restartOcrEngine, stopOcrEngine} from "../ocr/service";
 import {defaultFormulaOrder, engineConfig, isOcrEngineId, normalizeDirKey, OCR_ENGINE_DEFS, OCR_ENGINE_IDS} from "../ocr/engines";
 import {detectOcrBundle, detectPdf2zhServer, discoverBundles, isBundleCompatible, readBundleLogTail} from "../ocr/bundles";
@@ -269,7 +269,7 @@ export function openSettings(host: PluginHost): void {
         </div>
         <div class="fn__flex" style="gap:8px">
           <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>源语言</span><select class="b3-select fn__block" data-field="pdf2zhSourceLang">${["en", "zh", "ja", "ko", "fr", "de", "es", "ru"].map(code => `<option value="${code}" ${(settings.pdf2zhSourceLang || "en") === code ? "selected" : ""}>${code}</option>`).join("")}</select></label>
-          <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>对照方向</span><select class="b3-select fn__block" data-field="pdf2zhDualMode"><option value="LR" ${settings.pdf2zhDualMode !== "TB" ? "selected" : ""}>左右对照</option><option value="TB" ${settings.pdf2zhDualMode === "TB" ? "selected" : ""}>上下对照</option></select></label>
+          <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px" data-role="pdf2zh-dual-row" ${settings.pdf2zhOutputMode === "dual" ? "" : "hidden"}><span>对照方向</span><select class="b3-select fn__block" data-field="pdf2zhDualMode"><option value="LR" ${settings.pdf2zhDualMode !== "TB" ? "selected" : ""}>左右对照</option><option value="TB" ${settings.pdf2zhDualMode === "TB" ? "selected" : ""}>上下对照</option></select></label>
         </div>
       </details>
       <details class="pz-ocr-section">
@@ -284,21 +284,28 @@ export function openSettings(host: PluginHost): void {
         </div>
         <div class="fn__flex" style="gap:8px;margin-bottom:8px">
           <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>目标语言</span><select class="b3-select fn__block" data-field="doc2xTargetLang">${['<option value="">跟随默认目标语言</option>'].concat(DOC2X_TARGETS.map(code => `<option value="${code}" ${settings.doc2xTargetLang === code ? "selected" : ""}>${code}</option>`)).join("")}</select></label>
-          <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>输出</span><select class="b3-select fn__block" data-field="doc2xOutputMode"><option value="dualPdf" ${settings.doc2xOutputMode !== "translatedPdf" ? "selected" : ""}>双语双栏 PDF</option><option value="translatedPdf" ${settings.doc2xOutputMode === "translatedPdf" ? "selected" : ""}>纯译文 PDF（重排）</option></select></label>
+          <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>输出</span><select class="b3-select fn__block" data-field="doc2xOutputMode"><option value="translatedPdf" ${settings.doc2xOutputMode === "translatedPdf" ? "selected" : ""}>纯译文</option><option value="dualPdf" ${settings.doc2xOutputMode !== "translatedPdf" ? "selected" : ""}>对照翻译</option></select></label>
+        </div>
+        <div class="fn__flex" style="gap:8px;margin-bottom:8px" data-role="doc2x-dual-row">
+          <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>翻译类型</span><select class="b3-select fn__block" data-field="doc2xTranslateType"><option value="pdf" ${settings.doc2xTranslateType !== "md" ? "selected" : ""}>固定排版（双栏 PDF）</option><option value="md" ${settings.doc2xTranslateType === "md" ? "selected" : ""}>文档型（Markdown / Word）</option></select></label>
+          <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px" data-role="doc2x-font-row"><span>PDF 字体策略</span><select class="b3-select fn__block" data-field="doc2xFontStrategy"><option value="global-consistent" ${settings.doc2xFontStrategy !== "page-optimal" ? "selected" : ""}>全局一致</option><option value="page-optimal" ${settings.doc2xFontStrategy === "page-optimal" ? "selected" : ""}>单页优先</option></select></label>
         </div>
         <div class="fn__flex" style="gap:8px;margin-bottom:8px">
-          <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>翻译模型</span><select class="b3-select fn__block" data-field="doc2xModel"><option value="">默认（Free / 10001）</option>${settings.doc2xModel ? `<option value="${escapeHtml(settings.doc2xModel)}" selected>${escapeHtml(settings.doc2xModel)}</option>` : ""}</select></label>
+          <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>翻译模型</span><div style="display:flex;gap:5px"><select class="b3-select fn__block" data-field="doc2xModel" style="flex:1"><option value="">官方默认（Free）</option>${settings.doc2xModel ? `<option value="${escapeHtml(settings.doc2xModel)}" selected>${escapeHtml(settings.doc2xModel)}</option>` : ""}</select><button type="button" class="b3-button b3-button--outline" data-act="doc2x-refresh-models" style="flex:0 0 auto;font-size:11px;padding:3px 8px">刷新</button></div><span class="pz-help">读取自 doc2x models list，仅显示当前账号可用模型。</span></label>
           <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>术语表</span><div style="display:flex;gap:5px"><select class="b3-select fn__block" data-field="doc2xTermId" style="flex:1"><option value="">不使用术语表</option>${settings.doc2xTermId ? `<option value="${escapeHtml(settings.doc2xTermId)}" selected>${escapeHtml(settings.doc2xTermId)}</option>` : ""}</select><button type="button" class="b3-button b3-button--outline" data-act="doc2x-refresh-terms" style="flex:0 0 auto;font-size:11px;padding:3px 8px">更新</button></div></label>
         </div>
         <div class="fn__flex" style="gap:8px;margin-bottom:8px">
-          <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>PDF 字体策略</span><select class="b3-select fn__block" data-field="doc2xFontStrategy"><option value="global-consistent" ${settings.doc2xFontStrategy !== "page-optimal" ? "selected" : ""}>全局一致</option><option value="page-optimal" ${settings.doc2xFontStrategy === "page-optimal" ? "selected" : ""}>单页优先</option></select></label>
+          <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>解析模型 · 图片 OCR</span><select class="b3-select fn__block" data-field="doc2xParseImageModel"><option value="doc2x" ${settings.doc2xParseImageModel !== "mathpix" ? "selected" : ""}>doc2x</option><option value="mathpix" ${settings.doc2xParseImageModel === "mathpix" ? "selected" : ""}>mathpix（需权限）</option></select></label>
+          <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>解析模型 · 视觉模型</span><select class="b3-select fn__block" data-field="doc2xVisionModel"><option value="">不使用视觉模型</option>${settings.doc2xVisionModel ? `<option value="${escapeHtml(settings.doc2xVisionModel)}" selected>${escapeHtml(settings.doc2xVisionModel)}</option>` : ""}</select><span class="pz-help">用于 PDF→Markdown 解析；同样来自官方模型列表。</span></label>
+        </div>
+        <div class="fn__flex" style="gap:8px;margin-bottom:8px">
           <div class="fn__flex" style="flex-direction:column;gap:4px"><span>翻译时忽略</span><div style="display:flex;gap:8px;flex-wrap:wrap;padding-top:4px">${[["table", "表格"], ["code", "代码"], ["figure", "图片"], ["reference", "文献"]].map(([value, label]) => `<label style="display:flex;align-items:center;gap:3px"><input type="checkbox" data-doc2x-ignore="${value}" ${(settings.doc2xIgnoreTypes || []).includes(value) ? "checked" : ""}/>${label}</label>`).join("")}</div></div>
         </div>
         <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><input type="checkbox" data-field="doc2xContextual" ${settings.doc2xContextual ? "checked" : ""}/> 上下文增强（会员）</label>
         <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><input type="checkbox" data-field="doc2xFontColor" ${settings.doc2xFontColor ? "checked" : ""}/> 保留原 PDF 字体颜色</label>
         <button class="b3-button b3-button--outline" data-act="doc2x-check" style="margin-bottom:6px">检测 Doc2X 环境 / 刷新模型</button>
         <div data-role="doc2x-env" class="pz-muted" style="font-size:12px;line-height:1.6;margin-bottom:4px"></div>
-        <div class="pz-help">以上为 Doc2X CLI 支持的参数；标识符位置、双语 MD/HTML 输出、排版 Word 输出属于网页/客户端配置，CLI 没有对应参数。</div>
+        <div class="pz-help">翻译模型/解析模型均来自官方 doc2x models list，只显示当前账号可用项；对照翻译选择「文档型」时输出 Markdown 并插入笔记。PDF→Markdown 转换在 Dock 菜单：「解析PDF为Md到笔记」使用解析模型，「翻译PDF为Md到笔记」使用翻译模型。</div>
       </details>
     </div>
     <div class="pz-subpage" data-settings-subpage="service">
@@ -622,6 +629,9 @@ export function openSettings(host: PluginHost): void {
             doc2xAuthMode: fieldValue("doc2xAuthMode") === "client" ? "client" : "oauth",
             doc2xTargetLang: fieldValue("doc2xTargetLang") || "",
             doc2xOutputMode: fieldValue("doc2xOutputMode") === "translatedPdf" ? "translatedPdf" : "dualPdf",
+            doc2xTranslateType: fieldValue("doc2xTranslateType") === "md" ? "md" : "pdf",
+            doc2xParseImageModel: fieldValue("doc2xParseImageModel") === "mathpix" ? "mathpix" : "doc2x",
+            doc2xVisionModel: fieldValue("doc2xVisionModel"),
             doc2xModel: fieldValue("doc2xModel"),
             doc2xTermId: fieldValue("doc2xTermId"),
             doc2xFontStrategy: fieldValue("doc2xFontStrategy") === "page-optimal" ? "page-optimal" : "global-consistent",
@@ -952,6 +962,49 @@ export function openSettings(host: PluginHost): void {
             + (legacy ? "<div>ℹ 检测到便携版 PDF2zh，已切换引擎为 pdf2zh、服务为 bing。</div>" : "");
     });
     const doc2xEnv = root.querySelector<HTMLElement>('[data-role="doc2x-env"]')!;
+    const fillSelect = (select: HTMLSelectElement | null, items: any[], emptyLabel: string, toValue: (item: any) => string, toLabel: (item: any) => string) => {
+        if (!select) return;
+        const currentValue = select.value;
+        const options = [`<option value="">${escapeHtml(emptyLabel)}</option>`];
+        const seen = new Set<string>();
+        for (const item of items || []) {
+            const value = toValue(item);
+            if (!value || seen.has(value)) continue;
+            seen.add(value);
+            options.push(`<option value="${escapeHtml(value)}" ${value === currentValue ? "selected" : ""}>${escapeHtml(toLabel(item))}</option>`);
+        }
+        select.innerHTML = options.join("");
+    };
+    const applyDoc2xModels = (models: any[], terms: any[]): void => {
+        fillSelect(field<HTMLSelectElement>("doc2xModel"), models, "官方默认（Free）",
+            item => String(item?.modelId ?? item?.id ?? item?.name ?? ""),
+            item => {
+                const id = String(item?.modelId ?? item?.id ?? "");
+                const name = String(item?.displayName || item?.name || id);
+                return `${name} (${id})${item?.subscriptionRequired ? " · 需订阅" : ""}`;
+            });
+        fillSelect(field<HTMLSelectElement>("doc2xVisionModel"), models, "不使用视觉模型",
+            item => String(item?.modelId ?? item?.id ?? item?.name ?? ""),
+            item => {
+                const id = String(item?.modelId ?? item?.id ?? "");
+                const name = String(item?.displayName || item?.name || id);
+                return `${name} (${id})${item?.subscriptionRequired ? " · 需订阅" : ""}`;
+            });
+        fillSelect(field<HTMLSelectElement>("doc2xTermId"), terms, "不使用术语表",
+            item => String(item?.id ?? item?.termId ?? item?.name ?? ""),
+            item => String(item?.name ?? item?.title ?? item?.id ?? ""));
+    };
+    const refreshDoc2xModels = async (announce = false): Promise<void> => {
+        if (announce) doc2xEnv.textContent = "正在读取 Doc2X 官方模型列表…";
+        const list = await fetchDoc2xModelList(probeSettings());
+        applyDoc2xModels(list.models, list.terms);
+        if (announce) doc2xEnv.textContent = `已读取 ${list.models.length} 个官方翻译模型、${list.terms.length} 个术语表。`;
+    };
+    root.querySelector('[data-act="doc2x-refresh-models"]')?.addEventListener("click", () => {
+        void refreshDoc2xModels(true).catch((error: any) => {
+            doc2xEnv.textContent = `读取模型失败：${String(error?.message || error).slice(0, 200)}`;
+        });
+    });
     root.querySelector('[data-act="doc2x-refresh-terms"]')?.addEventListener("click", () => {
         (root.querySelector('[data-act="doc2x-check"]') as HTMLButtonElement | null)?.click();
     });
@@ -959,24 +1012,39 @@ export function openSettings(host: PluginHost): void {
         doc2xEnv.textContent = "检测中…";
         const probe = probeSettings();
         const result = await checkDoc2xEnvironment(probe);
-        const fill = (select: HTMLSelectElement | null, items: any[], emptyLabel: string, toValue: (item: any) => string, toLabel: (item: any) => string) => {
-            if (!select) return;
-            const currentValue = select.value;
-            const options = [`<option value="">${escapeHtml(emptyLabel)}</option>`];
-            const seen = new Set<string>();
-            for (const item of items || []) {
-                const value = toValue(item);
-                if (!value || seen.has(value)) continue;
-                seen.add(value);
-                options.push(`<option value="${escapeHtml(value)}" ${value === currentValue ? "selected" : ""}>${escapeHtml(toLabel(item))}</option>`);
-            }
-            select.innerHTML = options.join("");
-        };
-        fill(field<HTMLSelectElement>("doc2xModel"), result.models || [], "默认（Free / 10001）", item => String(item?.modelId ?? item?.id ?? item?.name ?? ""), item => `${item?.displayName || item?.name || item?.modelId || ""} (${item?.modelId ?? item?.id ?? ""})`);
-        fill(field<HTMLSelectElement>("doc2xTermId"), result.terms || [], "不使用术语表", item => String(item?.id ?? item?.termId ?? item?.name ?? ""), item => String(item?.name ?? item?.title ?? item?.id ?? ""));
+        try {
+            const list = await fetchDoc2xModelList(probe);
+            applyDoc2xModels(list.models, list.terms);
+        } catch {
+            // model list unavailable; keep saved selections
+        }
         doc2xEnv.innerHTML = result.checks.map(item => `<div>${item.ok ? "✓" : "✗"} ${escapeHtml(item.label)}：${escapeHtml(item.detail)}</div>`).join("")
             + (result.ok ? "<div>✓ Doc2X 已就绪，翻译时后台直接调用 CLI</div>" : "<div>✗ 首次使用请先运行 doc2x login</div>");
     });
+
+    // Doc2X output type + PDF2zh dual direction visibility
+    const applyDoc2xVisibility = (): void => {
+        const dual = fieldValue("doc2xOutputMode") !== "translatedPdf";
+        const dualRow = root.querySelector<HTMLElement>('[data-role="doc2x-dual-row"]');
+        if (dualRow) dualRow.hidden = !dual;
+        const isMd = fieldValue("doc2xTranslateType") === "md";
+        const fontRow = root.querySelector<HTMLElement>('[data-role="doc2x-font-row"]');
+        if (fontRow) fontRow.hidden = !dual || isMd;
+    };
+    const applyPdf2zhVisibility = (): void => {
+        const row = root.querySelector<HTMLElement>('[data-role="pdf2zh-dual-row"]');
+        if (row) row.hidden = fieldValue("pdf2zhOutputMode") !== "dual";
+    };
+    field<HTMLSelectElement>("doc2xOutputMode")?.addEventListener("change", applyDoc2xVisibility);
+    field<HTMLSelectElement>("doc2xTranslateType")?.addEventListener("change", applyDoc2xVisibility);
+    field<HTMLSelectElement>("pdf2zhOutputMode")?.addEventListener("change", applyPdf2zhVisibility);
+    applyDoc2xVisibility();
+    applyPdf2zhVisibility();
+    window.setTimeout(() => {
+        if (!closed()) {
+            void refreshDoc2xModels(false).catch((): undefined => undefined);
+        }
+    }, 600);
 
     // service list: active radio + edit/test
     root.querySelectorAll<HTMLInputElement>('input[name="pzActiveService"]').forEach(radio => {
