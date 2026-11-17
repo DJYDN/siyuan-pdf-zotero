@@ -438,6 +438,7 @@ img[data-src*="#pz="], img[src*="#pz="] { cursor: pointer; outline: 0 !important
 .pz-dock .pz-status.err { background: rgba(220, 80, 80, .16); }
 .pz-dock .pz-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .pz-dock .pz-list { display: flex; flex-direction: column; gap: 5px; min-height:0; overflow:auto; padding-right:2px; }
+.pz-dock .pz-zotero-list { flex:1 1 auto; min-height:0; }
 .pz-dock .pz-list-item { flex:0 0 auto; text-align: left; border: 1px solid var(--b3-border-color); border-radius: 7px; padding: 7px 9px; cursor: pointer; background: var(--b3-theme-background); }
 .pz-dock .pz-list-item:hover { border-color: var(--b3-theme-primary); }
 .pz-dock .pz-list-item .pz-item-title { display:flex; align-items:flex-start; gap:5px; font-size: 12px; line-height: 1.35; }

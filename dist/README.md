@@ -295,7 +295,7 @@ node scripts\install-plugin.mjs --workspace "C:\Users\Asus\SiYuan\Dataset"
 
 ```text
 TypeScript：0 errors
-Node tests：133/133 pass
+Node tests：136 个（1 个跳过）
 插件版本：0.9.58
 ```
 

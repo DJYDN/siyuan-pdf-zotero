@@ -134,10 +134,9 @@ function formatTime(ts: number): string {
 type DockView = "reading" | "recent" | "translations" | "zotero";
 const DOCK_VIEW_KEY = "pdf-zotero-dock-view";
 const storedDockView = localStorage.getItem(DOCK_VIEW_KEY);
-const dockFilter: {query: string; collection: string; page: number; view: DockView; parseFilter: "all" | "parse" | "translate"} = {
+const dockFilter: {query: string; collection: string; view: DockView; parseFilter: "all" | "parse" | "translate"} = {
     query: "",
     collection: "",
-    page: 0,
     parseFilter: "all",
     view: storedDockView === "recent" || storedDockView === "zotero" || storedDockView === "translations" ? storedDockView : "reading",
 };
@@ -184,15 +183,13 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
         const haystack = [item.title, item.creators.join(" "), item.year, item.doi || ""].join(" ").toLowerCase();
         return haystack.includes(dockFilter.query.toLowerCase());
     }).sort((a, b) => Number(host.store.isZoteroItemPinned(b.key)) - Number(host.store.isZoteroItemPinned(a.key)));
-    const pageSize = 12;
-    const pageCount = Math.max(1, Math.ceil(filteredItems.length / pageSize));
-    dockFilter.page = Math.min(dockFilter.page, pageCount - 1);
-    const pageItems = filteredItems.slice(dockFilter.page * pageSize, (dockFilter.page + 1) * pageSize);
-    const zoteroItems = pageItems.map(item => `
+    const ZOTERO_BATCH = 40;
+    const zoteroItemHtml = (item: (typeof filteredItems)[number]) => `
 <button draggable="true" class="pz-list-item${host.store.isZoteroItemPinned(item.key) ? " is-pinned" : ""}" data-zotero-key="${escapeHtml(item.key)}" title="打开该文献的 PDF 附件">
   <div class="pz-item-title">${host.store.isZoteroItemPinned(item.key) ? '<span class="pz-pin-badge">📌</span>' : ""}${escapeHtml(item.title || "(无标题)")}</div>
   <div class="pz-item-meta">${escapeHtml(item.creators.join("; ") || "未知作者")}${item.year ? ` · ${escapeHtml(item.year)}` : ""} · ${escapeHtml(item.itemType)}</div>
-</button>`).join("");
+</button>`;
+    const zoteroItems = filteredItems.slice(0, ZOTERO_BATCH).map(zoteroItemHtml).join("");
     const collectionOptions = `<option value="">全部 Collection</option>` + collections
         .map(collection => `<option value="${escapeHtml(collection.key)}" ${dockFilter.collection === collection.key ? "selected" : ""}>${escapeHtml(collection.name)}</option>`)
         .join("");
@@ -360,12 +357,7 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
     <input class="b3-text-field fn__block" data-role="zotero-search" placeholder="搜索标题、作者、年份或 DOI" value="${escapeHtml(dockFilter.query)}" />
     <select class="b3-select fn__block" data-role="zotero-collection">${collectionOptions}</select>
   </div>
-  <div class="pz-list pz-zotero-list">${zoteroItems || `<div class="pz-dock-empty"><strong>没有匹配的文献</strong><span>请刷新 Zotero 或调整搜索条件。</span></div>`}</div>
-  <div class="pz-pagination">
-    <button data-act="zotero-prev" ${dockFilter.page <= 0 ? "disabled" : ""}>上一页</button>
-    <span>第 ${dockFilter.page + 1} / ${pageCount} 页</span>
-    <button data-act="zotero-next" ${dockFilter.page >= pageCount - 1 ? "disabled" : ""}>下一页</button>
-  </div>
+  <div class="pz-list pz-zotero-list" data-role="zotero-list">${zoteroItems || `<div class="pz-dock-empty"><strong>没有匹配的文献</strong><span>请刷新 Zotero 或调整搜索条件。</span></div>`}</div>
   <details class="pz-dock-runtime"><summary>连接信息</summary><div class="pz-muted">Node fs ${fsAvailable ? "可用" : "不可用"} · Electron webUtils ${hasWebUtils ? "可用" : "不可用"}<br>${escapeHtml(state.settings.zoteroDataDir || "未设置数据目录")}</div></details>
 </section>`;
 
@@ -388,13 +380,11 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
 
     element.querySelector<HTMLInputElement>('[data-role="zotero-search"]')?.addEventListener("input", (event) => {
         dockFilter.query = (event.target as HTMLInputElement).value;
-        dockFilter.page = 0;
         window.clearTimeout(dockSearchTimer);
         dockSearchTimer = window.setTimeout(() => host.refreshDock(), 260);
     });
     element.querySelector<HTMLSelectElement>('[data-role="zotero-collection"]')?.addEventListener("change", (event) => {
         dockFilter.collection = (event.target as HTMLSelectElement).value;
-        dockFilter.page = 0;
         host.refreshDock();
     });
     element.querySelector<HTMLSelectElement>('[data-role="parse-filter"]')?.addEventListener("change", (event) => {
@@ -402,6 +392,21 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
         dockFilter.parseFilter = value === "parse" || value === "translate" ? value : "all";
         host.refreshDock();
     });
+    const zoteroList = element.querySelector<HTMLElement>('[data-role="zotero-list"]');
+    if (zoteroList) {
+        let rendered = Math.min(filteredItems.length, ZOTERO_BATCH);
+        let loading = false;
+        const loadMore = (): void => {
+            if (loading || rendered >= filteredItems.length) return;
+            if (zoteroList.scrollTop + zoteroList.clientHeight < zoteroList.scrollHeight - 80) return;
+            loading = true;
+            const next = filteredItems.slice(rendered, rendered + ZOTERO_BATCH);
+            zoteroList.insertAdjacentHTML("beforeend", next.map(zoteroItemHtml).join(""));
+            rendered += next.length;
+            loading = false;
+        };
+        zoteroList.addEventListener("scroll", loadMore, {passive: true});
+    }
     element.addEventListener("dragstart", (event) => {
         const target = (event.target as HTMLElement).closest<HTMLElement>("[data-zotero-key],[data-attachment-id]");
         if (!target || !event.dataTransfer) return;
@@ -447,12 +452,6 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
                 host.openCitationDialog();
             } else if (action === "settings") {
                 openSettings(host);
-            } else if (action === "zotero-prev") {
-                dockFilter.page = Math.max(0, dockFilter.page - 1);
-                host.refreshDock();
-            } else if (action === "zotero-next") {
-                dockFilter.page++;
-                host.refreshDock();
             } else if (target.dataset.zoteroKey) {
                 await host.openZoteroItem(target.dataset.zoteroKey);
             } else if (target.dataset.attachmentId) {
