@@ -420,6 +420,12 @@ img[data-src*="#pz="], img[src*="#pz="] { cursor: pointer; outline: 0 !important
 .pz-dock-tabs button span { margin-left:2px; font-size:10px; opacity:.7; }
 .pz-dock-tabs button.is-active { background:var(--b3-theme-background) !important; color:var(--b3-theme-primary); box-shadow:0 1px 4px rgba(0,0,0,.12); font-weight:600; }
 .pz-zotero-summary { display:flex; align-items:baseline; gap:6px; min-width:0; overflow:hidden; white-space:nowrap; }
+.pz-zotero-head-actions { display:flex; align-items:center; gap:5px; flex:0 0 auto; }
+.pz-dock button.pz-zotero-status-btn { display:inline-flex; align-items:center; gap:5px; cursor:default; pointer-events:none; }
+.pz-status-dot { width:7px; height:7px; border-radius:50%; display:inline-block; flex:0 0 auto; }
+.pz-status-dot.is-online { background:#34d399; box-shadow:0 0 6px rgba(52,211,153,.85); }
+.pz-status-dot.is-offline { background:#f59e0b; box-shadow:0 0 6px rgba(245,158,11,.85); }
+.pz-status-dot.is-off { background:#94a3b8; }
 .pz-zotero-summary > span { overflow:hidden; text-overflow:ellipsis; }
 .pz-dock-view { flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; overflow:hidden; }
 .pz-view-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }

@@ -350,19 +350,20 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
   </select></div>
   <div class="pz-list">${orderedItems || `<div class="pz-dock-empty"><strong>还没有解析或翻译结果</strong><span>在 PDF 菜单里使用「解析 PDF 为 Markdown」或「翻译 PDF 为 Markdown」后，结果显示在这里。</span></div>`}</div>
 </section>`;
-    const offlineSuffix = cache.lastError && hasZoteroCache ? " · 当前离线" : "";
+    const offline = Boolean(cache.lastError && hasZoteroCache);
     const syncLabel = cache.updatedAt ? `${formatTime(cache.updatedAt)} 同步` : "";
     const summaryParts = [
-        hasZoteroCache ? `${filteredItems.length} 条` : "未连接",
         hasZoteroCache ? `${cache.items.length} 条缓存` : "",
         hasZoteroCache ? `${cache.attachments?.length || 0} PDF` : "",
         syncLabel,
     ].filter(Boolean);
     const zoteroSummaryTitle = hasZoteroCache
-        ? `${cachedStatus}${offlineSuffix}`
+        ? cachedStatus
         : (cache.lastError ? `Zotero Local API 不可用：${cache.lastError}` : "尚未读取 Zotero，请点击刷新");
+    const connection = !hasZoteroCache ? "未连接" : (offline ? "离线" : "在线");
+    const connectionTone = !hasZoteroCache ? "is-off" : (offline ? "is-offline" : "is-online");
     const zoteroView = `<section class="pz-dock-view">
-  <div class="pz-view-heading"><div class="pz-zotero-summary" title="${escapeHtml(zoteroSummaryTitle)}"><strong>Zotero 文献</strong><span class="pz-muted">· ${escapeHtml(summaryParts.join(" · "))}${offlineSuffix}</span></div><button data-act="refresh-zotero">刷新</button></div>
+  <div class="pz-view-heading"><div class="pz-zotero-summary" title="${escapeHtml(zoteroSummaryTitle)}"><strong>Zotero 文献</strong>${summaryParts.length ? `<span class="pz-muted">· ${escapeHtml(summaryParts.join(" · "))}</span>` : ""}</div><div class="pz-zotero-head-actions"><button type="button" class="pz-zotero-status-btn" aria-disabled="true" tabindex="-1" title="${escapeHtml(zoteroSummaryTitle)}"><span class="pz-status-dot ${connectionTone}"></span>${connection}</button><button data-act="refresh-zotero">刷新</button></div></div>
   <div class="pz-dock-filters">
     <input class="b3-text-field fn__block" data-role="zotero-search" placeholder="搜索标题、作者、年份或 DOI" value="${escapeHtml(dockFilter.query)}" />
     <select class="b3-select fn__block" data-role="zotero-collection">${collectionOptions}</select>
