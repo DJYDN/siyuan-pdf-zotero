@@ -363,7 +363,7 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
     const connection = !hasZoteroCache ? "未连接" : (offline ? "离线" : "在线");
     const connectionTone = !hasZoteroCache ? "is-off" : (offline ? "is-offline" : "is-online");
     const zoteroView = `<section class="pz-dock-view">
-  <div class="pz-view-heading"><div class="pz-zotero-summary" title="${escapeHtml(zoteroSummaryTitle)}"><strong>Zotero 文献</strong>${summaryParts.length ? `<span class="pz-muted">· ${escapeHtml(summaryParts.join(" · "))}</span>` : ""}</div><div class="pz-zotero-head-actions"><button type="button" class="pz-zotero-status-btn" aria-disabled="true" tabindex="-1" title="${escapeHtml(zoteroSummaryTitle)}"><span class="pz-status-dot ${connectionTone}"></span>${connection}</button><button data-act="refresh-zotero">刷新</button></div></div>
+  <div class="pz-view-heading"><div class="pz-zotero-summary" title="${escapeHtml(zoteroSummaryTitle)}"><strong>Zotero 文献</strong>${summaryParts.length ? `<span class="pz-muted">· ${escapeHtml(summaryParts.join(" · "))}</span>` : ""}</div><div class="pz-zotero-head-actions"><button type="button" class="pz-zotero-status-btn ${connectionTone}" aria-disabled="true" tabindex="-1" title="${escapeHtml(zoteroSummaryTitle)}">${connection}</button><button data-act="refresh-zotero">刷新</button></div></div>
   <div class="pz-dock-filters">
     <input class="b3-text-field fn__block" data-role="zotero-search" placeholder="搜索标题、作者、年份或 DOI" value="${escapeHtml(dockFilter.query)}" />
     <select class="b3-select fn__block" data-role="zotero-collection">${collectionOptions}</select>

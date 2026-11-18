@@ -1,5 +1,11 @@
 # Release / Tag 记录
 
+## v0.9.62
+
+- 插件：`siyuan-pdf-zotero-0.9.62.zip`
+- 便携包（带版本号）：OCR-Texo / OCR-Pix2Text / OCR-UniMERNet / OCR-Service / SiYuan-PDF2zh `-0.9.62.zip`
+- 更新：Zotero 单行标题与状态按钮；选区十字光标；便携包瘦身 + VC++ 运行库 + CHECK-OCR.bat + UniMERNet 修复
+
 ## v0.9.59
 
 - 插件：`siyuan-pdf-zotero-0.9.59.zip`（SHA256 `60E5C3201FA7ADFCD68A7D9FA40B2652C881AB47B851179AD14EA2877D9153D1`）
