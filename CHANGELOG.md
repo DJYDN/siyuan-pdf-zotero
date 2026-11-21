@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.63
+
+- 上架思源集市准备版：Release 附件改名为 `package.zip`（集市 Stage 只认这个名字），发布流程改为 GitHub Actions tag 触发自动构建；
+- 版本号同步：`plugin.json` / `package.json` / `package-lock.json` 统一到 `0.9.63`；
+- 发布包不含 `index.js.map`，体积更小、不泄露构建机路径；
+- `package.zip` 同时带上 `docs/screenshots/`，集市「说明文档」里的截图不再 404；
+- `plugin.json` 多语言键改用 BCP-47 标准写法 `zh-CN`（原 `zh_CN` 不会被识别）；
+- `preview.png` 压缩到 241 KB 并声明 `preview` 字段（集市上限 512 KB）；
+- 新增 `LICENSE`（MIT）；
+- 功能与 0.9.62 相同，详见下方各版说明。
+
 ## v0.9.62
 
 - Zotero 标题行合并为单行，去掉匹配数；在线/离线/未连接改为同款按钮样式（绿/黄/灰），与刷新横排等大、不可点击；

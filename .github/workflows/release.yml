@@ -1,0 +1,109 @@
+name: Release
+
+# Push a tag like v0.9.63 -> validate, build, test, package and publish package.zip.
+#
+# Why the attachment must be named exactly `package.zip`:
+#   The SiYuan bazaar Stage workflow only downloads
+#   https://github.com/OWNER/REPO/releases/latest/download/package.zip
+#   Any other attachment name is ignored and Stage fails with
+#   "Latest Release 中缺少名为 package.zip 的资源文件".
+#
+# FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 keeps the still-Node20 actions/* and
+# softprops/action-gh-release@v2 off GitHub's deprecated runtime.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  release:
+    name: Build and publish package.zip
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify tag version matches package.json and plugin.json
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          PLUGIN_VERSION="$(node -p "require('./plugin.json').version")"
+          echo "tag         = ${GITHUB_REF_NAME} (${TAG_VERSION})"
+          echo "package.json= ${PKG_VERSION}"
+          echo "plugin.json = ${PLUGIN_VERSION}"
+          if [ "${TAG_VERSION}" != "${PKG_VERSION}" ] || [ "${TAG_VERSION}" != "${PLUGIN_VERSION}" ]; then
+            echo "::error::tag version (${TAG_VERSION}) != package.json (${PKG_VERSION}) != plugin.json (${PLUGIN_VERSION})"
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Unit and integration tests
+        run: npm test
+
+      - name: Build plugin
+        run: node scripts/build.mjs
+
+      - name: Package package.zip
+        run: |
+          set -euo pipefail
+          # A source map is ~6 MB of noise (and a build-machine path leak) for end users:
+          # it must never end up inside the bazaar package.
+          rm -f dist/index.js.map
+          find dist -name "*.map" -type f -print -delete
+          test -f dist/plugin.json
+          test -f dist/index.js
+          test -f dist/README.md
+          ( cd dist && zip -r -q ../package.zip . )
+          echo "== package.zip =="
+          ls -l package.zip
+          unzip -l package.zip | head -n 20
+          # hard guarantee: no .map entry inside the zip
+          MAP_COUNT="$(unzip -Z1 package.zip | grep -c '\.map$' || true)"
+          echo "map entries in package.zip: ${MAP_COUNT}"
+          if [ "${MAP_COUNT}" != "0" ]; then
+            echo "::error::package.zip still contains source maps"
+            exit 1
+          fi
+
+      - name: Resolve release name
+        id: meta
+        run: |
+          set -euo pipefail
+          DISPLAY_NAME="$(node -p "const m = require('./plugin.json').displayName; typeof m === 'string' ? m : m.default")"
+          echo "name=${DISPLAY_NAME} v${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF_NAME#v}"                >> "$GITHUB_OUTPUT"
+
+      - name: Publish Latest Release with package.zip
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ steps.meta.outputs.name }}
+          files: package.zip
+          make_latest: true
+          overwrite_files: true
+          draft: false
+          prerelease: false

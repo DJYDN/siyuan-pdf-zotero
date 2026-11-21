@@ -6,7 +6,13 @@ import process from "node:process";
 
 const root = path.resolve(import.meta.dirname, "..");
 const dist = path.join(root, "dist");
-const pdfjsRoot = path.join(root, "node_modules", "pdfjs-dist");
+// pdfjs-dist 6.x keeps its assets in legacy/build at the package root; npm hoisting can also
+// place the package under node_modules/.pnpm or the root node_modules when run from scripts/.
+const pdfjsRoot = [
+    path.join(root, "node_modules", "pdfjs-dist"),  // 6.x: assets directly under the package root
+    path.join(root, "node_modules", "pdfjs-dist", "legacy"),
+].find(candidate => fs.existsSync(path.join(candidate, "build", "pdf.worker.min.mjs")))
+    || path.join(root, "node_modules", "pdfjs-dist");
 
 function findEsbuild() {
     const candidates = [
@@ -71,6 +77,13 @@ function run() {
     }
     fs.cpSync(path.join(root, "i18n"), path.join(dist, "i18n"), {recursive: true});
     fs.cpSync(path.join(root, "styles"), path.join(dist, "styles"), {recursive: true});
+    // README.md references docs/screenshots/* by relative path; bazaar + in-plugin previews need them.
+    const docsDir = path.join(root, "docs");
+    if (fs.existsSync(docsDir)) {
+        fs.cpSync(docsDir, path.join(dist, "docs"), {recursive: true});
+    } else {
+        console.warn("[build] missing optional dir: docs");
+    }
 
     const pdfjsFiles = [
         ["build/pdf.min.mjs", "pdf.min.mjs"],
@@ -79,7 +92,8 @@ function run() {
     for (const [from, to] of pdfjsFiles) {
         fs.copyFileSync(path.join(pdfjsRoot, from), path.join(dist, to));
     }
-    for (const dir of ["cmaps", "standard_fonts", "wasm", "iccs"]) {
+    for (const dir of ["cmaps", "standard_fonts", "wasm", "iccs", "images"]) {
+        if (!fs.existsSync(path.join(pdfjsRoot, dir))) continue;
         fs.cpSync(path.join(pdfjsRoot, dir), path.join(dist, dir), {recursive: true});
     }
     const katexRoot = path.join(root, "node_modules", "katex", "dist");
