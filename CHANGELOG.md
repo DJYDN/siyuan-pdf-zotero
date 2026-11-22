@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.9.64
+
+- 发布页与安装说明改为集市安装：思源 设置 → 集市 搜索「PDF × Zotero」即可安装，不再需要手动下载 zip；
+- README 增加技术咨询 QQ 群（1134977804）与 Issue 反馈入口；
+- 版本号同步到 `0.9.64`（`plugin.json` / `package.json` / `package-lock.json`）；
+- 功能与 0.9.63 相同。
+
 ## v0.9.63
 
 - 上架思源集市准备版：Release 附件改名为 `package.zip`（集市 Stage 只认这个名字），发布流程改为 GitHub Actions tag 触发自动构建；

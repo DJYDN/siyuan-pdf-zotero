@@ -2,7 +2,7 @@
   "name": "siyuan-pdf-zotero",
   "author": "DJYDN",
   "url": "https://github.com/DJYDN/siyuan-pdf-zotero",
-  "version": "0.9.63",
+  "version": "0.9.64",
   "minAppVersion": "3.8.7",
   "backends": [
     "windows"
