@@ -14,6 +14,7 @@
 
 **技术咨询 QQ 群：[1134977804](https://qm.qq.com/q/1134977804)**　·　问题反馈：[GitHub Issues](https://github.com/DJYDN/siyuan-pdf-zotero/issues)
 
+技术咨询QQ群：1134977804
 ---
 
 ## 亮点
