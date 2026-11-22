@@ -12,6 +12,7 @@
 
 当前版本：**v0.9.62** · [统一发布页](https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/v0.9.62)
 
+技术咨询QQ群：1134977804
 ---
 
 ## 亮点
