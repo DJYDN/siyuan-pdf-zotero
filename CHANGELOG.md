@@ -5,6 +5,7 @@
 - 发布页与安装说明改为集市安装：思源 设置 → 集市 搜索「PDF × Zotero」即可安装，不再需要手动下载 zip；
 - README 增加技术咨询 QQ 群（1134977804）与 Issue 反馈入口；
 - 版本号同步到 `0.9.64`（`plugin.json` / `package.json` / `package-lock.json`）；
+- Release 一并提供三个常用离线包：`OCR-Texo-Portable-0.9.63.zip`、`OCR-Pix2Text-Portable-0.9.63.zip`、`SiYuan-PDF2zh-Portable-0.9.63.zip`（SHA-256 见 `SHA256SUMS-0.9.63.txt`）；
 - 功能与 0.9.63 相同。
 
 ## v0.9.63

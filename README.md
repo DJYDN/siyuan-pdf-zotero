@@ -107,9 +107,11 @@ Texo / UniMERNet / Pix2Text 三引擎独立服务，可单独启停；公式优�
 
 | 包 | 用途 | 安装方式 |
 |---|---|---|
-| Texo / UniMERNet / Pix2Text | 本地 OCR | 解压到固定目录 → 插件设置 → OCR → 引擎卡片选目录、启用、点「检测」 |
-| PDF2zh | 本地整篇翻译 | 解压 `SiYuan-PDF2zh-Portable.zip` → 设置 → 翻译 › 整篇 → 填服务目录 → 检测 |
-| OCR-Service-Portable | 旧版共用 OCR 服务 | 仅支持 Pix2Text / UniMERNet；**Texo 必须使用 OCR-Texo-Portable** |
+| `OCR-Texo-Portable-0.9.63.zip` | 本地 OCR（公式，最快） | 解压到固定目录 → 插件设置 → OCR → Texo 卡片选目录、启用、点「检测」 |
+| `OCR-Pix2Text-Portable-0.9.63.zip` | 本地 OCR（公式 + 文本 + 混合） | 同上，选 Pix2Text 卡片 |
+| `SiYuan-PDF2zh-Portable-0.9.63.zip` | 本地整篇翻译 | 解压后 → 设置 → 翻译 › 整篇 → 填服务目录 → 检测 |
+| `OCR-UniMERNet-Portable-0.9.62.zip` | 本地 OCR（公式） | 在 [v0.9.62 Release](https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/v0.9.62) 下载 |
+| `OCR-Service-Portable-0.9.62.zip` | 旧版共用 OCR 服务 | 同上；仅支持 Pix2Text / UniMERNet |
 
 > 三个 OCR 引擎都自带 Python 运行时，**不需要单独装 Python**。多个引擎可在设置里共用一份运行时目录以节省磁盘。
 >
@@ -145,11 +147,11 @@ Texo / UniMERNet / Pix2Text 三引擎独立服务，可单独启停；公式优�
 
 ### 本地 OCR（三引擎）
 
-| 引擎 | 能力 | 默认端口 | 包 |
+| 引擎 | 能力 | 默认端口 | 包（v0.9.64 Release） |
 |---|---|---|---|
-| **Texo** | 仅公式，20M 参数 ONNX，纯 CPU，最快 | 8893 | `OCR-Texo-Portable.zip` |
-| **UniMERNet** | 仅公式，transformers 推理 | 8892 | `OCR-UniMERNet-Portable.zip` |
-| **Pix2Text** | 公式 + 文本 + 混合 | 8891 | `OCR-Pix2Text-Portable.zip` |
+| **Texo** | 仅公式，20M 参数 ONNX，纯 CPU，最快 | 8893 | `OCR-Texo-Portable-0.9.63.zip` |
+| **UniMERNet** | 仅公式，transformers 推理 | 8892 | `OCR-UniMERNet-Portable-0.9.62.zip`（在 v0.9.62 Release） |
+| **Pix2Text** | 公式 + 文本 + 混合 | 8891 | `OCR-Pix2Text-Portable-0.9.63.zip` |
 
 - 引擎各自独立服务、独立目录与端口；指向同一目录的引擎共用一个服务进程（兼容旧版 OCR-Service-Portable）；
 - 引擎卡片：启用、目录、端口、自动启动、状态、环境检测、启动/停止/重启；
