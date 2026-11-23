@@ -78,11 +78,12 @@ function run() {
     fs.cpSync(path.join(root, "i18n"), path.join(dist, "i18n"), {recursive: true});
     fs.cpSync(path.join(root, "styles"), path.join(dist, "styles"), {recursive: true});
     // README.md references docs/screenshots/* by relative path; bazaar + in-plugin previews need them.
-    const docsDir = path.join(root, "docs");
-    if (fs.existsSync(docsDir)) {
-        fs.cpSync(docsDir, path.join(dist, "docs"), {recursive: true});
+    // Only screenshots ship: docs/marketing and the design notes are repo-only and would inflate package.zip.
+    const shotsDir = path.join(root, "docs", "screenshots");
+    if (fs.existsSync(shotsDir)) {
+        fs.cpSync(shotsDir, path.join(dist, "docs", "screenshots"), {recursive: true});
     } else {
-        console.warn("[build] missing optional dir: docs");
+        console.warn("[build] missing optional dir: docs/screenshots");
     }
 
     const pdfjsFiles = [

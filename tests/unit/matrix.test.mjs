@@ -11,7 +11,7 @@ test("migrateMatrixProject upgrades legacy views and canvas state", () => {
         views: [{id: "v1", name: "legacy view", filter: "", sortColumn: "", sortDirection: "asc"}],
     });
     assert.equal(changed, true);
-    assert.equal(project.schemaVersion, 1);
+    assert.equal(project.schemaVersion, 3);
     assert.equal(project.views[0].kind, "table");
     assert.deepEqual(project.views[0].filters, []);
     assert.equal(project.views[0].filterLogic, "and");
@@ -32,7 +32,7 @@ test("migrateMatrixProject initializes canvas arrays", () => {
 test("migrateMatrixProject supplies safe defaults for absent state", () => {
     const {project, changed} = migrateMatrixProject(null);
     assert.equal(changed, true);
-    assert.equal(project.schemaVersion, 1);
+    assert.equal(project.schemaVersion, 3);
     assert.ok(project.columns.length > 0);
     assert.deepEqual(project.rows, []);
     assert.deepEqual(project.views, []);
@@ -50,3 +50,4 @@ test("formulaValue computes count and sum", () => {
     assert.equal(formulaValue(project, row, project.columns[1]), "7");
     assert.equal(formulaValue(project, row, project.columns[2]), "1");
 });
+

@@ -262,6 +262,10 @@ export interface Settings {
     ocrDefaultAction: "insert" | "replace" | "copy" | "append";
     ocrHistoryLimit: number;
     ocrPreview: boolean;
+    /** Prewarm the preferred OCR engines in the background after the plugin loads. */
+    ocrPrewarm: boolean;
+    /** Downscale very large screenshots before OCR (long edge in px; 0 = disabled). */
+    ocrMaxImageEdge: number;
     ocrDevice: "auto" | "cpu" | "cuda";
     ocrEnableTable: boolean;
     ocrEnableSpellChecker: boolean;
@@ -322,6 +326,66 @@ export interface Settings {
     automationModelId: string;
     automationMaxChars: number;
     automationDebug: boolean;
+    /** Reading statistics (dwell-time tracking). */
+    readingTrackEnabled: boolean;
+    /** Seconds of inactivity before the tracker stops counting as reading. */
+    readingIdleSeconds: number;
+    /** Ratio of visited pages that marks a PDF as finished. */
+    readingDoneRatio: number;
+    /** easyScholar open API key for journal tags; empty disables the feature. */
+    journalApiKey: string;
+    /** easyScholar fields to display, e.g. "sci,sciif,ccf". */
+    journalFields: string;
+    /** Display mapping, same syntax as Zotero Style: "SCIIF(5)=IF(5), SCI=,". */
+    journalMap: string;
+    /** OpenAlex API key; empty falls back to the shared polite pool. */
+    openAlexApiKey: string;
+}
+
+/** Per-PDF reading statistics. Keyed by attachment id. */
+export interface ReadingStat {
+    /** Total pages when the PDF was last opened. */
+    pages: number;
+    /** Page number (1-based) -> accumulated seconds. */
+    dwell: Record<string, number>;
+    /** 1-based page numbers that have been reached, sorted ascending. */
+    visited: number[];
+    lastPage: number;
+    lastReadAt: number;
+    /** Sum of dwell values; kept for cheap sorting. */
+    totalSeconds: number;
+    /** Manual override; wins over the derived status. */
+    manualStatus?: ReadingStatus;
+    /** Per-day accumulated seconds, key "YYYY-MM-DD", used by the reading panel. */
+    days: Record<string, number>;
+}
+
+export type ReadingStatus = "unread" | "reading" | "done";
+
+/** Rating and one-line remark for an item (Zotero item key, or attachment id for local PDFs). */
+export interface ItemMeta {
+    rating?: number;
+    remark?: string;
+    updatedAt: number;
+}
+
+/** Cached easyScholar lookup for one journal name. */
+export interface JournalEntry {
+    fields: Record<string, string>;
+    at: number;
+}
+
+/** Persisted gallery preferences (global, not per matrix project). */
+export interface GalleryPrefs {
+    mode: "items" | "notes" | "annotations";
+    layout: "vertical" | "horizontal";
+    fields: string[];
+    sortColumn: string;
+    sortDirection: "asc" | "desc";
+    colorFilter: string;
+    groupBy: "itemType" | "year" | "venue" | "rating" | "readStatus";
+    scope: "library" | "project";
+    covers: boolean;
 }
 
 export type TranslationServiceType =
@@ -463,7 +527,7 @@ export interface MatrixRow {
     lastZoteroSyncAt?: number;
 }
 
-export type MatrixViewKind = "table" | "kanban" | "canvas";
+export type MatrixViewKind = "table" | "kanban" | "canvas" | "gallery";
 
 export type MatrixCanvasNodeKind = "row" | "pdf" | "note" | "text" | "tag" | "group" | "image";
 
@@ -571,6 +635,16 @@ export interface PersistedState {
     lastReaderAttachmentId: string;
     /** Exact open-PDF tabs at the last workspace snapshot. */
     readerSession: ReaderSessionState;
+    /** Reading statistics keyed by attachment id. */
+    reading: Record<string, ReadingStat>;
+    /** Rating / remark keyed by Zotero item key or attachment id. */
+    itemMeta: Record<string, ItemMeta>;
+    /** Journal tag cache keyed by normalized journal name. */
+    journalCache: Record<string, JournalEntry>;
+    /** Global gallery preferences; undefined until migrated/created. */
+    gallery?: GalleryPrefs;
+    /** Cover crop position (0-100) keyed by Zotero item key. */
+    coverCrop?: Record<string, number>;
 }
 
 export interface OpenAnnotationPayload {

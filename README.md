@@ -10,7 +10,7 @@
 
 本地优先：不修改原始 PDF、不写 Zotero 数据库、OCR 与翻译服务全部跑在本机。
 
-当前版本：**v0.9.64** · [统一发布页](https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/v0.9.64)
+当前版本：**v0.9.96** · [统一发布页](https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/v0.9.96)
 
 **技术咨询 QQ 群：[1134977804](https://qm.qq.com/q/1134977804)**　·　问题反馈：[GitHub Issues](https://github.com/DJYDN/siyuan-pdf-zotero/issues)
 
@@ -23,6 +23,10 @@
 - **超长公式自动排版**：OCR 结果自动安全换行 + 缩进 + 压缩 `\,` 噪声，渲染结果不变；已有公式块右键「格式化公式」。
 - **翻译全免费起步**：划词翻译内置 Bing / MyMemory 无需 Key；整篇 PDF 可本地跑 PDF2zh（双语对照/纯译文），也可用个人 Doc2X 账号；解析与翻译历史统一在 Dock「解析翻译」中管理。
 - **PDF++ 式阅读**：高亮、摘录、区域截图、区域链接、点击笔记回跳原位、悬浮预览 PDF 内链与标注卡片。
+- **阅读统计（新）**：在思源里读 PDF 时自动记录每页停留时长，派生出进度、状态、时长、最近阅读；列表带细进度条。
+- **评级与期刊标签（新）**：列表行内五星打分 + 一句话简记；接入 easyScholar（自备密钥）显示分区 / 影响因子，矩阵自动汇总。
+- **文献网络（新）**：右键文献按 Connected Papers 方式展开先期 / 衍生工作，节点大小=被引、颜色=年份、距离=共被引相似度，可直接把节点加入文献矩阵。
+- **文献矩阵画廊（新）**：矩阵第四种视图，条目 / 笔记 / 标注三种卡片墙；封面、评级、简记、阅读状态一屏浏览，可切布局与字段。
 - **Zotero 深度集成**：Local API 搜索、Collection 过滤、结构化引文、121 种 CSL 样式、引文编号自动刷新。
 - **设置已重构**：5 个一级页 + 全局搜索 + 即时生效；需要重启服务的项通过顶部「立即应用」统一生效。
 
@@ -99,7 +103,7 @@ Texo / UniMERNet / Pix2Text 三引擎独立服务，可单独启停；公式优�
 ### 1. 插件本体
 
 1. 安装思源桌面版 **3.8.7+**；
-2. `设置 → 集市 → 已下载 → 安装本地插件`，选择从 Release 下载的 `package.zip`；
+2. `设置 → 集市 → 已下载 → 安装本地插件`，选择 `siyuan-pdf-zotero-0.9.63.zip`；
    - 压缩包已按思源插件规范打包：`plugin.json`、`index.js`、`i18n/`、`styles/` 等直接位于 zip 根目录，**没有嵌套文件夹**；
 3. 启用插件，右侧栏会出现 **PDF × Zotero** Dock，顶栏出现打开 PDF 的图标。
 
@@ -107,11 +111,9 @@ Texo / UniMERNet / Pix2Text 三引擎独立服务，可单独启停；公式优�
 
 | 包 | 用途 | 安装方式 |
 |---|---|---|
-| `OCR-Texo-Portable-0.9.63.zip` | 本地 OCR（公式，最快） | 解压到固定目录 → 插件设置 → OCR → Texo 卡片选目录、启用、点「检测」 |
-| `OCR-Pix2Text-Portable-0.9.63.zip` | 本地 OCR（公式 + 文本 + 混合） | 同上，选 Pix2Text 卡片 |
-| `SiYuan-PDF2zh-Portable-0.9.63.zip` | 本地整篇翻译 | 解压后 → 设置 → 翻译 › 整篇 → 填服务目录 → 检测 |
-| `OCR-UniMERNet-Portable-0.9.62.zip` | 本地 OCR（公式） | 在 [v0.9.62 Release](https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/v0.9.62) 下载 |
-| `OCR-Service-Portable-0.9.62.zip` | 旧版共用 OCR 服务 | 同上；仅支持 Pix2Text / UniMERNet |
+| Texo / UniMERNet / Pix2Text | 本地 OCR | 解压到固定目录 → 插件设置 → OCR → 引擎卡片选目录、启用、点「检测」 |
+| PDF2zh | 本地整篇翻译 | 解压 `SiYuan-PDF2zh-Portable.zip` → 设置 → 翻译 › 整篇 → 填服务目录 → 检测 |
+| OCR-Service-Portable | 旧版共用 OCR 服务 | 仅支持 Pix2Text / UniMERNet；**Texo 必须使用 OCR-Texo-Portable** |
 
 > 三个 OCR 引擎都自带 Python 运行时，**不需要单独装 Python**。多个引擎可在设置里共用一份运行时目录以节省磁盘。
 >
@@ -147,11 +149,11 @@ Texo / UniMERNet / Pix2Text 三引擎独立服务，可单独启停；公式优�
 
 ### 本地 OCR（三引擎）
 
-| 引擎 | 能力 | 默认端口 | 包（v0.9.64 Release） |
+| 引擎 | 能力 | 默认端口 | 包 |
 |---|---|---|---|
-| **Texo** | 仅公式，20M 参数 ONNX，纯 CPU，最快 | 8893 | `OCR-Texo-Portable-0.9.63.zip` |
-| **UniMERNet** | 仅公式，transformers 推理 | 8892 | `OCR-UniMERNet-Portable-0.9.62.zip`（在 v0.9.62 Release） |
-| **Pix2Text** | 公式 + 文本 + 混合 | 8891 | `OCR-Pix2Text-Portable-0.9.63.zip` |
+| **Texo** | 仅公式，20M 参数 ONNX，纯 CPU，最快 | 8893 | `OCR-Texo-Portable.zip` |
+| **UniMERNet** | 仅公式，transformers 推理 | 8892 | `OCR-UniMERNet-Portable.zip` |
+| **Pix2Text** | 公式 + 文本 + 混合 | 8891 | `OCR-Pix2Text-Portable.zip` |
 
 - 引擎各自独立服务、独立目录与端口；指向同一目录的引擎共用一个服务进程（兼容旧版 OCR-Service-Portable）；
 - 引擎卡片：启用、目录、端口、自动启动、状态、环境检测、启动/停止/重启；
@@ -202,6 +204,15 @@ Texo / UniMERNet / Pix2Text 三引擎独立服务，可单独启停；公式优�
 - AI 填充预览后应用；
 - 导出 CSV / 导出为思源表格。
 
+### 阅读统计与评级
+
+- 阅读器每 10 秒给当前页记一次停留时间；窗口失焦、标签页隐藏、闲置超过阈值（默认 120 秒）自动停表；
+- 派生数据：阅读进度（访问过的页数 / 总页数）、累计时长、最近阅读时间、每页停留分布；
+- 状态自动判定：无记录 → 未读，进度 ≥ 阈值（默认 95%）→ 已读，其余 → 在读；
+- Dock 列表保持原有四个 tab，条目内只增加一条细进度条与状态/时长文字，不额外占行；
+- 评级：列表行内五星，单击打分，再点同一颗清除；右键菜单可评级或编辑简记；
+- 期刊标签：设置里填 easyScholar 密钥，右键文献「获取期刊标签」，结果按刊名缓存；矩阵新增「进度 / 时长 / 最近阅读 / 标注 / 期刊标签」只读列。
+
 ### 默认笔记模板
 
 - Better Notes 风格 `${...}`、`${{...}}$` 表达式与代码块；
@@ -239,7 +250,7 @@ Texo / UniMERNet / Pix2Text 三引擎独立服务，可单独启停；公式优�
 
 ## 从 v0.9.56 以来的主要变化
 
-> 完整清单见 [CHANGELOG.md](CHANGELOG.md)，发布说明见 [release-notes/v0.9.64.md](release-notes/v0.9.64.md)。
+> 完整清单见 [CHANGELOG.md](CHANGELOG.md)，发布说明见 [release-notes/v0.9.63.md](release-notes/v0.9.63.md)。
 
 - OCR 从单服务升级为 **Pix2Text / UniMERNet / Texo 三引擎独立服务**，新增 Texo 与 UniMERNet/Pix2Text 独立便携包；
 - OCR 结果弹窗重做为 Texo 风格（源码/渲染同屏、KaTeX/MathLive 切换、10 种复制格式、自动复制、换图重识别、示例图）；
@@ -257,7 +268,7 @@ Texo / UniMERNet / Pix2Text 三引擎独立服务，可单独启停；公式优�
 - Texo 只识别公式；表格/整页文字请用 Pix2Text；
 - 首次启动：Texo 1–3 秒；Pix2Text 约 1–3 分钟；UniMERNet 首次推理约 2 分钟（之后常驻，单张 1–3 秒）；
 - 旧 `OCR-Service-Portable` 中的 UniMERNet 受原模型包限制，建议使用独立包；
-- Ethereal Style 字段未完整实现；
+- 期刊标签依赖 easyScholar 的开放接口与用户自备密钥，接口额度与可用字段以提供方为准；未配置时该列保持空白；
 - PDF2zh 依赖网络翻译服务（默认 Bing）；
 - 模板执行本地 JS，只使用可信模板；
 - 写回 PDF 标注会修改源文件，默认关闭。
@@ -278,6 +289,7 @@ src/
   matrix/               文献矩阵
   template/             笔记模板引擎
   translation/          翻译服务、PDF2zh、Doc2X、目标语言
+  reading/              阅读统计、采集器、easyScholar 期刊标签
   pdf/                  PDF.js 封装
 release/                便携包目录与 zip
 scripts/                构建、测试、运行时裁剪、模型转换
@@ -299,8 +311,8 @@ node scripts\install-plugin.mjs --workspace "C:\Users\Asus\SiYuan\Dataset"
 
 ```text
 TypeScript：0 errors
-Node tests：136 个（1 个跳过）
-插件版本：0.9.64
+Node tests：170 个（1 个跳过）
+插件版本：0.9.96
 ```
 
 ## 安全边界
@@ -313,7 +325,7 @@ Node tests：136 个（1 个跳过）
 
 ## 版本与发布
 
-- 统一发布页：https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/v0.9.64
+- 统一发布页：https://github.com/DJYDN/siyuan-pdf-zotero/releases/tag/v0.9.63
 - 版本说明：[`RELEASE_TAGS.md`](RELEASE_TAGS.md)
 - 变更日志：[`CHANGELOG.md`](CHANGELOG.md)
 

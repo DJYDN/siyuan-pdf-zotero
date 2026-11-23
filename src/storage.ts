@@ -2,13 +2,18 @@ import type {Plugin} from "siyuan";
 import {MATRIX_MIGRATION_BACKUP_KEY, MATRIX_SCHEMA_VERSION, STATE_VERSION, STORAGE_KEY} from "./constants";
 import {defaultTranslationServices} from "./translation/defaults";
 import {migrateMatrixProject} from "./matrix/model";
+import {normalizeGallerySettings} from "./matrix/gallery";
+import {normalizeReadingStat} from "./reading/stats";
 import {normalizeEngineMap} from "./ocr/engines";
 import type {
     Annotation,
     Book,
+    ItemMeta,
+    JournalEntry,
     NoteLink,
     PdfAttachment,
     PersistedState,
+    ReadingStat,
     Settings,
     QaMessage,
     QaThread,
@@ -41,6 +46,44 @@ function migrateQaThreads(raw: any): Record<string, QaThread> {
         };
     }
     return threads;
+}
+
+function migrateReading(raw: any): Record<string, ReadingStat> {
+    const reading: Record<string, ReadingStat> = {};
+    if (!raw || typeof raw !== "object") return reading;
+    for (const [attachmentId, value] of Object.entries<any>(raw)) {
+        if (!attachmentId) continue;
+        reading[attachmentId] = normalizeReadingStat(value);
+    }
+    return reading;
+}
+
+function migrateCoverCrop(raw: any): Record<string, number> | undefined {
+    if (!raw || typeof raw !== "object") return undefined;
+    const crop: Record<string, number> = {};
+    for (const [key, value] of Object.entries<any>(raw)) {
+        const number = Number(value);
+        if (!key || !Number.isFinite(number)) continue;
+        crop[key] = Math.min(100, Math.max(0, number));
+    }
+    return Object.keys(crop).length ? crop : undefined;
+}
+
+function migrateItemMeta(raw: any): Record<string, ItemMeta> {
+    const meta: Record<string, ItemMeta> = {};
+    if (!raw || typeof raw !== "object") return meta;
+    for (const [key, value] of Object.entries<any>(raw)) {
+        if (!key || !value || typeof value !== "object") continue;
+        const rating = Number(value.rating);
+        const remark = typeof value.remark === "string" ? value.remark : "";
+        if (!Number.isFinite(rating) && !remark) continue;
+        meta[key] = {
+            ...(Number.isFinite(rating) && rating > 0 ? {rating: Math.min(5, Math.max(1, Math.round(rating)))} : {}),
+            ...(remark ? {remark} : {}),
+            updatedAt: Number(value.updatedAt) || Date.now(),
+        };
+    }
+    return meta;
 }
 
 export function newId(prefix: string): string {
@@ -98,6 +141,13 @@ export function defaultState(): PersistedState {
             automationModelId: "",
             automationMaxChars: 450,
             automationDebug: false,
+            readingTrackEnabled: true,
+            readingIdleSeconds: 120,
+            readingDoneRatio: 0.95,
+            journalApiKey: "",
+            journalFields: "sci,sciif,eii",
+            journalMap: "SCIIF=IF, SCI=, EI检索=EI",
+            openAlexApiKey: "",
             translationEnabled: true,
             translationAuto: true,
             translationMinChars: 2,
@@ -142,6 +192,8 @@ export function defaultState(): PersistedState {
             ocrDefaultAction: "insert",
             ocrHistoryLimit: 50,
             ocrPreview: true,
+            ocrPrewarm: true,
+            ocrMaxImageEdge: 2200,
             ocrDevice: "cpu",
             ocrEnableTable: false,
             ocrEnableSpellChecker: true,
@@ -196,6 +248,9 @@ export function defaultState(): PersistedState {
             activeAttachmentId: "",
             readerAttachmentIds: [],
         },
+        reading: {},
+        itemMeta: {},
+        journalCache: {},
     };
 }
 
@@ -374,6 +429,11 @@ export class Store {
                     ? raw.readerSession.readerAttachmentIds.filter((id): id is string => typeof id === "string" && Boolean(id))
                     : [],
             },
+            reading: migrateReading(raw.reading),
+            itemMeta: migrateItemMeta(raw.itemMeta),
+            journalCache: raw.journalCache && typeof raw.journalCache === "object" ? raw.journalCache : {},
+            gallery: raw.gallery && typeof raw.gallery === "object" ? normalizeGallerySettings(raw.gallery) : undefined,
+            coverCrop: migrateCoverCrop(raw.coverCrop),
         };
     }
 
@@ -411,6 +471,61 @@ export class Store {
         return Object.values(this.state.annotations)
             .filter(a => a.attachmentId === attachmentId)
             .sort((a, b) => a.page - b.page || a.createdAt - b.createdAt);
+    }
+
+    readingStat(attachmentId: string): ReadingStat | undefined {
+        return this.state.reading[attachmentId];
+    }
+
+    /** Create the record on first open so an untouched PDF still shows "未读". */
+    ensureReadingStat(attachmentId: string, pages: number): ReadingStat {
+        const existing = this.state.reading[attachmentId];
+        if (existing) {
+            if (pages > 0 && existing.pages !== pages) existing.pages = Math.floor(pages);
+            return existing;
+        }
+        const created = normalizeReadingStat({pages, lastPage: this.state.attachments[attachmentId]?.lastPage || 1});
+        this.state.reading[attachmentId] = created;
+        return created;
+    }
+
+    setReadingStat(attachmentId: string, stat: ReadingStat): void {
+        this.state.reading[attachmentId] = stat;
+    }
+
+    /** Rating/remark are keyed by Zotero item key, falling back to the attachment id. */
+    itemMeta(key: string): ItemMeta | undefined {
+        return key ? this.state.itemMeta[key] : undefined;
+    }
+
+    setItemRating(key: string, rating: number): void {
+        if (!key) return;
+        const meta = {...(this.state.itemMeta[key] || {updatedAt: 0})};
+        if (rating > 0) meta.rating = Math.min(5, Math.max(1, Math.round(rating)));
+        else delete meta.rating;
+        meta.updatedAt = Date.now();
+        if (!meta.rating && !meta.remark) delete this.state.itemMeta[key];
+        else this.state.itemMeta[key] = meta;
+    }
+
+    setItemRemark(key: string, remark: string): void {
+        if (!key) return;
+        const text = remark.trim();
+        const meta = {...(this.state.itemMeta[key] || {updatedAt: 0})};
+        if (text) meta.remark = text;
+        else delete meta.remark;
+        meta.updatedAt = Date.now();
+        if (!meta.rating && !meta.remark) delete this.state.itemMeta[key];
+        else this.state.itemMeta[key] = meta;
+    }
+
+    journalEntry(name: string): JournalEntry | undefined {
+        return name ? this.state.journalCache[name] : undefined;
+    }
+
+    setJournalEntry(name: string, fields: Record<string, string>): void {
+        if (!name) return;
+        this.state.journalCache[name] = {fields, at: Date.now()};
     }
 
     noteLinksForAnnotation(annotationId: string): NoteLink[] {

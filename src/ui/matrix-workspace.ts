@@ -1,17 +1,21 @@
 import {Dialog, getAllEditor, getActiveEditor, showMessage} from "siyuan";
-import {createDocWithMd} from "../api";
+import {createDocWithMd, getBlockAttrs} from "../api";
 import type {PluginHost} from "../host";
-import type {MatrixCanvasEdge, MatrixCanvasNode, MatrixCanvasState, MatrixColumn, MatrixFilterCondition, MatrixProject, MatrixRow, MatrixView, MatrixViewKind} from "../types";
+import type {MatrixCanvasEdge, MatrixCanvasNode, MatrixCanvasState, MatrixColumn, MatrixFilterCondition, MatrixProject, MatrixRow, MatrixView, MatrixViewKind, ReadingStatus} from "../types";
 import {createMatrixProject, formulaValue, suggestMatrixSchema, rowForZoteroItem} from "../matrix/model";
+import {GALLERY_GROUP_OPTIONS, itemTypeLabel, normalizeGallerySettings, statusFromLabel, statusLabel, type GallerySettings} from "../matrix/gallery";
+import {attachmentForZoteroItem, statusForStat} from "../reading";
 import {filterMatrixRows} from "../matrix/filter";
 import {matrixRowTags, suggestCanvasRelations} from "../matrix/relationships";
 import {autoLayoutMatrixCanvas, ensureMatrixCanvasNodes} from "../matrix/canvas";
+import {syncReadingValues} from "../matrix/reading";
 import {createNoteFromTemplate} from "../template/notes";
 import {openMatrixRow} from "./matrix-row";
 import {openMatrixAI} from "./matrix-ai";
 import {newId} from "../storage";
 import {loadAttachmentBytes} from "../pdf/source";
 import {openPdfDocument} from "../pdf/pdfjs";
+import {fileExists, requireNode, resolveZoteroAttachmentPath} from "../runtime";
 
 function escapeHtml(text: string): string {
     return text.replace(/[&<>"']/g, ch => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[ch] as string));
@@ -40,7 +44,7 @@ function ensureProject(host: PluginHost): MatrixProject {
 }
 
 function viewKind(view?: MatrixView): MatrixViewKind {
-    return view?.kind === "kanban" || view?.kind === "canvas" ? view.kind : "table";
+    return view?.kind === "kanban" || view?.kind === "canvas" || view?.kind === "gallery" ? view.kind : "table";
 }
 
 function canvasFor(view: MatrixView): MatrixCanvasState {
@@ -144,7 +148,14 @@ async function readThumbnailUrl(path: string): Promise<string> {    if (thumbnai
         body: JSON.stringify({path: `/${path}`}),
     });
     if (!response.ok) throw new Error(`thumbnail read failed: ${response.status}`);
-    const url = URL.createObjectURL(await response.blob());
+    const blob = await response.blob();
+    // SiYuan returns HTTP 200 with a JSON error body when the file is missing;
+    // treating that as an image would poison the cache and render broken thumbnails.
+    if (!blob.size || !blob.type.startsWith("image/")) {
+        void removeThumbnailCache(path);
+        throw new Error("thumbnail cache miss");
+    }
+    const url = URL.createObjectURL(blob);
     thumbnailUrls.set(path, url);
     return url;
 }
@@ -199,19 +210,28 @@ async function cleanOrphanThumbnails(host: PluginHost): Promise<number> {
 async function makePdfThumbnail(host: PluginHost, attachmentId: string): Promise<string | null> {
     const attachment = host.store.getAttachment(attachmentId);
     if (!attachment) return null;
+    if (attachment.zotero?.attachmentKey) {
+        const styleUrl = readStyleCover(
+            host.store.state.zotero.dataDir,
+            host.store.state.zotero.libraryId || 0,
+            attachment.zotero.attachmentKey,
+        );
+        if (styleUrl) return styleUrl;
+    }
     let pdfDoc: Awaited<ReturnType<typeof openPdfDocument>> | null = null;
     try {
         const loaded = await loadAttachmentBytes(attachment);
         pdfDoc = await openPdfDocument(loaded.bytes);
         const page = await pdfDoc.pdf.getPage(1);
-        const viewport = page.getViewport({scale: 0.35});
+        const base = page.getViewport({scale: 1});
+        const viewport = page.getViewport({scale: 520 / Math.max(1, base.width)});
         const canvas = document.createElement("canvas");
         canvas.width = Math.ceil(viewport.width);
         canvas.height = Math.ceil(viewport.height);
         const context = canvas.getContext("2d", {alpha: false});
         if (!context) return null;
         await page.render({canvas, canvasContext: context, viewport}).promise;
-        return canvas.toDataURL("image/jpeg", 0.72);
+        return canvas.toDataURL("image/jpeg", 0.88);
     } catch {
         return null;
     } finally {
@@ -219,10 +239,112 @@ async function makePdfThumbnail(host: PluginHost, attachmentId: string): Promise
     }
 }
 
+const zoteroCoverCache = new Map<string, string>();
+const zoteroCoverPending = new Set<string>();
+const ZOTERO_COVER_LIMIT = 256;
+
+/** Reuse Zotero Style's own cover cache when it is present: no PDF rendering needed. */
+function readStyleCover(dataDir: string, libraryId: number, attachmentKey: string): string | null {
+    if (!dataDir || !attachmentKey) return null;
+    const fs = requireNode("fs");
+    const pathModule = requireNode("path");
+    if (!fs?.readFileSync || !pathModule?.join) return null;
+    const dir = pathModule.join(dataDir, "cache", "zotero-style-covers-v1");
+    const candidates = [`${libraryId}-${attachmentKey}-520.json`, `1-${attachmentKey}-520.json`, `0-${attachmentKey}-520.json`];
+    for (const name of candidates) {
+        try {
+            const file = pathModule.join(dir, name);
+            if (!fs.existsSync(file)) continue;
+            const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+            const url = String(parsed?.url || "");
+            if (url.startsWith("data:image/jpeg;base64,") && url.length < 4 * 1024 * 1024) return url;
+        } catch {
+            // try the next candidate
+        }
+    }
+    return null;
+}
+
+function rememberZoteroCover(itemKey: string, url: string): void {
+    zoteroCoverCache.set(itemKey, url);
+    while (zoteroCoverCache.size > ZOTERO_COVER_LIMIT) {
+        const oldest = zoteroCoverCache.keys().next().value;
+        if (!oldest) break;
+        zoteroCoverCache.delete(oldest);
+    }
+}
+
+/** Render page 1 straight from a cached Zotero attachment, without importing it. */
+async function makeZoteroThumbnail(host: PluginHost, itemKey: string): Promise<string | null> {
+    const cached = zoteroCoverCache.get(itemKey);
+    if (cached) return cached;
+    if (zoteroCoverPending.has(itemKey)) return null;
+    zoteroCoverPending.add(itemKey);
+    let pdfDoc: Awaited<ReturnType<typeof openPdfDocument>> | null = null;
+    try {
+        const cache = host.store.state.zotero;
+        const candidates = (cache.attachments || []).filter(attachment => attachment.parentItemKey === itemKey);
+        const pdf = candidates.find(attachment => /pdf/i.test(attachment.contentType || "") || /\.pdf$/i.test(attachment.filename || attachment.rawPath || "")) || candidates[0];
+        // Style already rendered and cached this cover at 520px; reuse it before doing any work.
+        if (pdf) {
+            const styleUrl = readStyleCover(cache.dataDir, cache.libraryId || 0, pdf.attachmentKey);
+            if (styleUrl) {
+                rememberZoteroCover(itemKey, styleUrl);
+                return styleUrl;
+            }
+        }
+        const cachePath = `data/storage/petal/siyuan-pdf-zotero/matrix-thumbnails/zot520-${itemKey}.jpg`;
+        try {
+            const url = await readThumbnailUrl(cachePath);
+            rememberZoteroCover(itemKey, url);
+            return url;
+        } catch {
+            // no cached thumbnail yet
+        }
+        try {
+            const quick = await readThumbnailUrl(`data/storage/petal/siyuan-pdf-zotero/matrix-thumbnails/zot260-${itemKey}.jpg`);
+            rememberZoteroCover(itemKey, quick);
+            return quick;
+        } catch {
+            // fall through to generation
+        }
+        if (!pdf) return null;
+        const path = resolveZoteroAttachmentPath({
+            dataDir: cache.dataDir,
+            attachmentKey: pdf.attachmentKey,
+            path: pdf.rawPath,
+            filename: pdf.filename,
+        });
+        if (!path || !fileExists(path)) return null;
+        const fs = requireNode("fs");
+        const buffer = fs.readFileSync(path);
+        const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+        pdfDoc = await openPdfDocument(bytes);
+        const page = await pdfDoc.pdf.getPage(1);
+        const base = page.getViewport({scale: 1});
+        const viewport = page.getViewport({scale: 260 / Math.max(1, base.width)});
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        const context = canvas.getContext("2d", {alpha: false});
+        if (!context) return null;
+        await page.render({canvas, canvasContext: context, viewport}).promise;
+        const url = canvas.toDataURL("image/jpeg", 0.8);
+        rememberZoteroCover(itemKey, url);
+        void writeThumbnailCache(`zot260-${itemKey}`, url).catch(() => {});
+        return url;
+    } catch {
+        return null;
+    } finally {
+        zoteroCoverPending.delete(itemKey);
+        await pdfDoc?.destroy();
+    }
+}
+
 
 export function openMatrix(host: PluginHost): Dialog {
     let project = ensureProject(host);
-    let currentKind: MatrixViewKind = "table";
+    let currentKind: MatrixViewKind = "gallery";
     let currentViewId = "";
     let currentSortColumn = "";
     let currentSortDirection: "asc" | "desc" = "asc";
@@ -255,8 +377,9 @@ export function openMatrix(host: PluginHost): Dialog {
         content: `<div class="b3-dialog__content pz-matrix-dialog">
   <div class="pz-matrix-top">
     <div class="pz-matrix-tabs">
-      <button data-matrix-kind="table" class="is-active">表格</button>
+      <button data-matrix-kind="table">表格</button>
       <button data-matrix-kind="kanban">看板</button>
+      <button data-matrix-kind="gallery" class="is-active">画廊</button>
       <button data-matrix-kind="canvas">画布</button>
     </div>
     <div class="pz-matrix-projectbar">
@@ -309,6 +432,26 @@ export function openMatrix(host: PluginHost): Dialog {
     <div class="pz-matrix-kanban" data-role="matrix-kanban"></div>
   </div>
 
+  <div class="pz-matrix-pane" data-matrix-pane="gallery" hidden>
+    <div class="pz-gallery-toolbar">
+      <div class="pz-gallery-tabs">
+        <button data-gallery-mode="items" class="is-active">条目</button>
+        <button data-gallery-mode="notes">笔记</button>
+        <button data-gallery-mode="annotations">标注</button>
+      </div>
+      <div class="pz-gallery-status" data-role="gallery-status"></div>
+      <span class="fn__space"></span>
+      <select class="b3-select" data-role="gallery-scope" title="文库范围">
+        <option value="library">全部文库</option>
+        <option value="project">当前矩阵项目</option>
+      </select>
+      <select class="b3-select" data-role="gallery-group" title="分列依据"></select>
+      <span class="pz-muted" data-role="gallery-count"></span>
+      <button class="b3-button b3-button--outline" data-act="gallery-settings">显示设置</button>
+    </div>
+    <div class="pz-gallery-grid" data-role="matrix-gallery"></div>
+  </div>
+
   <div class="pz-matrix-pane" data-matrix-pane="canvas" hidden>
     <div class="pz-matrix-canvas-toolbar">
       <button class="b3-button b3-button--outline" data-act="canvas-auto-layout">自动布局</button>
@@ -355,6 +498,12 @@ export function openMatrix(host: PluginHost): Dialog {
     const tableBody = q<HTMLElement>('[data-role="matrix-body"]');
     const tablePane = q<HTMLElement>('[data-matrix-pane="table"]');
     const kanbanPane = q<HTMLElement>('[data-matrix-pane="kanban"]');
+    const galleryPane = q<HTMLElement>('[data-matrix-pane="gallery"]');
+    const galleryRoot = q<HTMLElement>('[data-role="matrix-gallery"]');
+    const galleryStatusBar = q<HTMLElement>('[data-role="gallery-status"]');
+    const galleryGroupSelect = q<HTMLSelectElement>('[data-role="gallery-group"]');
+    const galleryScopeSelect = q<HTMLSelectElement>('[data-role="gallery-scope"]');
+    const galleryCount = q<HTMLElement>('[data-role="gallery-count"]');
     const canvasPane = q<HTMLElement>('[data-matrix-pane="canvas"]');
     const kanbanRoot = q<HTMLElement>('[data-role="matrix-kanban"]');
     const kanbanMode = q<HTMLSelectElement>('[data-role="kanban-mode"]');
@@ -467,7 +616,7 @@ export function openMatrix(host: PluginHost): Dialog {
     };
 
     const updateStatus = () => {
-        const kindLabel = currentKind === "table" ? "表格" : currentKind === "kanban" ? "看板" : "画布";
+        const kindLabel = currentKind === "table" ? "表格" : currentKind === "kanban" ? "看板" : currentKind === "gallery" ? "画廊" : "画布";
         status.textContent = `${project.name} · ${project.rows.length} 篇 · ${project.columns.filter(column => column.visible).length} 列 · ${kindLabel}`;
     };
 
@@ -605,7 +754,17 @@ export function openMatrix(host: PluginHost): Dialog {
                 } else {
                     const groupIds = view.groupColumns?.filter(Boolean) || [];
                     const target = groupIds[groupIds.length - 1];
-                    if (target) row.values[target] = column.querySelector(".pz-kanban-column-head")?.textContent?.split(" ")[0] || "";
+                    const label = column.querySelector(".pz-kanban-column-head")?.textContent?.split(" ")[0] || "";
+                    if (target === "readStatus") {
+                        const status = statusFromLabel(label);
+                        const attachment = attachmentForZoteroItem(host.store, row.itemKey);
+                        if (status && attachment) {
+                            const stat = host.store.ensureReadingStat(attachment.id, host.store.readingStat(attachment.id)?.pages || 0);
+                            host.store.setReadingStat(attachment.id, {...stat, manualStatus: status});
+                        }
+                    } else if (target) {
+                        row.values[target] = label;
+                    }
                 }
                 project.updatedAt = Date.now();
                 await host.store.save();
@@ -1240,18 +1399,708 @@ export function openMatrix(host: PluginHost): Dialog {
         }
     };
 
+    /** Gallery preferences are global and persisted in plugin state (survives restarts). */
+    const loadGalleryPrefs = (): GallerySettings => {
+        const stored = host.store.state.gallery;
+        if (stored) return normalizeGallerySettings(stored);
+        try {
+            const legacy = globalThis.localStorage?.getItem(`pdf-zotero-gallery:${project.id}`);
+            if (legacy) {
+                const imported = normalizeGallerySettings(JSON.parse(legacy));
+                host.store.state.gallery = imported;
+                void host.store.save();
+                return imported;
+            }
+        } catch {
+            // legacy value unreadable; fall back to defaults
+        }
+        const fresh = normalizeGallerySettings(undefined);
+        host.store.state.gallery = fresh;
+        void host.store.save();
+        return fresh;
+    };
+    const saveGalleryPrefs = (settings: GallerySettings): void => {
+        host.store.state.gallery = {...settings};
+        void host.store.save();
+    };
+
+    let gallerySettings: GallerySettings = loadGalleryPrefs();
+    let galleryStatusFilter: "" | ReadingStatus = "";
+    const galleryCovers = new Map<string, string>();
+    const galleryPending = new Set<string>();
+    const galleryCoverQueue: string[] = [];
+    let galleryCoverActive = 0;
+    let galleryCoverObserver: IntersectionObserver | null = null;
+    const noteTitles = new Map<string, string>();
+
+    const resolveGalleryCover = async (ref: string): Promise<string | null> => {
+        if (ref.startsWith("att:")) return makePdfThumbnail(host, ref.slice(4));
+        if (ref.startsWith("zot:")) return makeZoteroThumbnail(host, ref.slice(4));
+        return null;
+    };
+
+    const pumpGalleryCovers = () => {
+        while (galleryCoverActive < 2 && galleryCoverQueue.length) {
+            const ref = galleryCoverQueue.shift()!;
+            galleryCoverActive += 1;
+            void resolveGalleryCover(ref).then(url => {
+                if (!url) {
+                    for (const holder of Array.from(galleryRoot.querySelectorAll<HTMLElement>(`[data-cover-ref="${CSS.escape(ref)}"]`))) {
+                        if (holder.querySelector("img")) continue;
+                        holder.classList.remove("is-loading");
+                        holder.classList.add("is-empty");
+                        const fallback = holder.querySelector<HTMLElement>(".pz-gallery-cover-fallback");
+                        if (fallback) fallback.textContent = "无封面";
+                    }
+                    return;
+                }
+                galleryCovers.set(ref, url);
+                while (galleryCovers.size > ZOTERO_COVER_LIMIT) {
+                    const oldest = galleryCovers.keys().next().value;
+                    if (!oldest) break;
+                    galleryCovers.delete(oldest);
+                }
+                for (const holder of Array.from(galleryRoot.querySelectorAll<HTMLElement>(`[data-cover-ref="${CSS.escape(ref)}"]`))) {
+                    if (holder.querySelector("img")) continue;
+                    holder.classList.remove("is-loading");
+                    holder.classList.add("has-cover");
+                    const position = readGalleryCrop(holder.dataset.itemKey || "");
+                    holder.innerHTML = `<img src="${url}" alt="" style="object-position:center ${position}%" />`;
+                }
+            }).finally(() => {
+                galleryCoverActive -= 1;
+                if (typeof (globalThis as any).requestIdleCallback === "function") {
+                    (globalThis as any).requestIdleCallback(() => pumpGalleryCovers(), {timeout: 600});
+                } else {
+                    globalThis.setTimeout(() => pumpGalleryCovers(), 30);
+                }
+            });
+        }
+    };
+
+    const gallerySortedRows = (rows: MatrixRow[]): MatrixRow[] => {
+        const columnId = gallerySettings.sortColumn;
+        if (!columnId) return rows;
+        const column = project.columns.find(item => item.id === columnId);
+        const numeric = column?.type === "number" || column?.type === "rating";
+        return [...rows].sort((a, b) => {
+            const av = a.values[columnId];
+            const bv = b.values[columnId];
+            const result = numeric
+                ? (Number(av) || 0) - (Number(bv) || 0)
+                : String(av ?? "").localeCompare(String(bv ?? ""), "zh-CN");
+            return gallerySettings.sortDirection === "desc" ? -result : result;
+        });
+    };
+
+    const hydrateGalleryCovers = () => {
+        const holders = Array.from(galleryRoot.querySelectorAll<HTMLElement>("[data-cover-ref]"));
+        const enqueue = (ref: string) => {
+            const cachedUrl = galleryCovers.get(ref);
+            if (cachedUrl) {
+                for (const holder of Array.from(galleryRoot.querySelectorAll<HTMLElement>(`[data-cover-ref="${CSS.escape(ref)}"]`))) {
+                    if (holder.querySelector("img")) continue;
+                    holder.classList.remove("is-loading");
+                    holder.classList.add("has-cover");
+                    const position = readGalleryCrop(holder.dataset.itemKey || "");
+                    holder.innerHTML = `<img src="${cachedUrl}" alt="" style="object-position:center ${position}%" />`;
+                }
+                return;
+            }
+            if (galleryPending.has(ref)) return;
+            galleryPending.add(ref);
+            galleryCoverQueue.push(ref);
+            pumpGalleryCovers();
+        };
+        if (typeof IntersectionObserver === "undefined") {
+            for (const holder of holders) enqueue(holder.dataset.coverRef || "");
+            return;
+        }
+        if (!galleryCoverObserver) {
+            galleryCoverObserver = new IntersectionObserver(entries => {
+                for (const entry of entries) {
+                    if (!entry.isIntersecting) continue;
+                    const holder = entry.target as HTMLElement;
+                    galleryCoverObserver?.unobserve(holder);
+                    enqueue(holder.dataset.coverRef || "");
+                }
+            }, {root: galleryRoot, rootMargin: "0px"});
+        }
+        for (const holder of holders) {
+            const ref = holder.dataset.coverRef || "";
+            if (!ref) continue;
+            if (galleryCovers.has(ref)) {
+                enqueue(ref);
+                continue;
+            }
+            galleryCoverObserver.observe(holder);
+        }
+    };
+
+    const galleryKindIcon = (code: string): string => {
+        if (code === "thesis") return "🎓";
+        if (code === "book" || code === "bookSection") return "📕";
+        if (code === "preprint") return "📰";
+        if (code === "conferencePaper") return "📄";
+        return "📄";
+    };
+
+    const galleryGroupFor = (row: MatrixRow, items: Map<string, any>): {key: string; label: string} => {
+        switch (gallerySettings.groupBy) {
+            case "year": {
+                const year = String(row.values.year ?? "").trim();
+                return {key: year || "未填写", label: year || "未填写年份"};
+            }
+            case "venue": {
+                const venue = String(row.values.venue ?? "").trim();
+                return {key: venue || "未填写", label: venue || "未填写期刊"};
+            }
+            case "rating": {
+                const rating = host.store.itemMeta(row.itemKey)?.rating || 0;
+                return {key: String(rating), label: rating ? `${"★".repeat(rating)}` : "未评分"};
+            }
+            case "readStatus": {
+                const attachment = attachmentForZoteroItem(host.store, row.itemKey);
+                const status = attachment ? statusForStat(host.store, host.store.readingStat(attachment.id)) : "unread";
+                return {key: status, label: statusLabel(status) || "未读"};
+            }
+            default: {
+                const itemType = items.get(row.itemKey)?.itemType || "";
+                return {key: itemType || "other", label: itemTypeLabel(itemType)};
+            }
+        }
+    };
+
+    const GALLERY_OVERSCAN = 360;
+    const GALLERY_CARD_ESTIMATE = 260;
+
+    interface GalleryVirtualColumn {
+        key: string;
+        rows: MatrixRow[];
+        el: HTMLElement;
+        windowEl: HTMLElement;
+    }
+
+    let galleryVirtual: {
+        columns: GalleryVirtualColumn[];
+        heights: Map<string, number[]>;
+        ranges: Map<string, [number, number]>;
+        rowsById: Map<string, MatrixRow>;
+        cardHtml: (row: MatrixRow) => string;
+    } | null = null;
+    let galleryVirtualFrame = 0;
+    let galleryMenuOpenedAt = 0;
+    let galleryScroll = {top: 0, left: 0};
+    const gallerySelected = new Set<string>();
+    const GALLERY_CROP_PREFIX = "pdf-zotero-gallery-crop:";
+
+    const readGalleryCrop = (itemKey: string): number => {
+        const stored = host.store.state.coverCrop?.[itemKey];
+        if (typeof stored === "number") return Math.min(100, Math.max(0, stored));
+        try {
+            const legacy = globalThis.localStorage?.getItem(GALLERY_CROP_PREFIX + itemKey);
+            if (legacy !== null) {
+                const value = Math.min(100, Math.max(0, Number(legacy) || 0));
+                host.store.state.coverCrop = {...(host.store.state.coverCrop || {}), [itemKey]: value};
+                void host.store.save();
+                return value;
+            }
+        } catch {
+            // ignore unreadable legacy value
+        }
+        return 0;
+    };
+    const writeGalleryCrop = (itemKey: string, value: number): void => {
+        host.store.state.coverCrop = {
+            ...(host.store.state.coverCrop || {}),
+            [itemKey]: Math.min(100, Math.max(0, value)),
+        };
+        void host.store.save();
+    };
+
+    const copyToClipboard = async (text: string, label: string) => {
+        try {
+            await navigator.clipboard.writeText(text);
+            showMessage(`已复制${label}`, 1500);
+        } catch {
+            showMessage("复制失败", 2500, "error");
+        }
+    };
+
+    const rowBibtex = (row: MatrixRow): string => {
+        const authors = String(row.values.authors || "").split(";").map(item => item.trim()).filter(Boolean);
+        const first = (authors[0] || "").replace(/[^A-Za-z]/g, "").toLowerCase() || "ref";
+        const year = String(row.values.year || "");
+        const fields = [
+            `  title = {${row.values.title || ""}}`,
+            authors.length ? `  author = {${authors.join(" and ")}}` : "",
+            year ? `  year = {${year}}` : "",
+            row.values.venue ? `  journal = {${row.values.venue}}` : "",
+            row.values.doi ? `  doi = {${row.values.doi}}` : "",
+        ].filter(Boolean).join(",\n");
+        return `@article{${first}${year},\n${fields}\n}`;
+    };
+
+    const closeGalleryMenu = () => {
+        document.querySelectorAll(".pz-gallery-menu").forEach(element => element.remove());
+    };
+
+    interface GalleryMenuItem {
+        label: string;
+        action?: () => void;
+        disabled?: boolean;
+        checked?: boolean;
+        children?: GalleryMenuItem[];
+    }
+
+    const showGalleryMenu = (x: number, y: number, items: GalleryMenuItem[]) => {
+        closeGalleryMenu();
+        const menu = document.createElement("div");
+        menu.className = "pz-gallery-menu";
+        const renderItems = (list: GalleryMenuItem[], parentPath: string): string => list.map((item, index) => {
+            const path = parentPath ? `${parentPath}.${index}` : String(index);
+            if (item.label === "-") return `<div class="pz-gallery-menu-sep"></div>`;
+            const prefix = item.checked ? "✓ " : "";
+            if (item.children?.length) {
+                return `<div class="pz-gallery-menu-item"><button data-gallery-menu-path="${path}">${prefix}${escapeHtml(item.label)} ▸</button><div class="pz-gallery-submenu">${renderItems(item.children, path)}</div></div>`;
+            }
+            return `<button data-gallery-menu-path="${path}" ${item.disabled ? "disabled" : ""}>${prefix}${escapeHtml(item.label)}</button>`;
+        }).join("");
+        const resolve = (path: string): GalleryMenuItem | undefined => {
+            let list = items;
+            let found: GalleryMenuItem | undefined;
+            for (const part of path.split(".")) {
+                found = list[Number(part)];
+                if (!found) return undefined;
+                list = found.children || [];
+            }
+            return found;
+        };
+        menu.innerHTML = renderItems(items, "");
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+        document.body.appendChild(menu);
+        const rect = menu.getBoundingClientRect();
+        menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - rect.width - 8))}px`;
+        menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - rect.height - 8))}px`;
+        menu.addEventListener("click", event => {
+            const button = (event.target as HTMLElement).closest<HTMLElement>("[data-gallery-menu-path]");
+            if (!button) return;
+            const item = resolve(button.dataset.galleryMenuPath || "");
+            if (!item || item.children?.length) return;
+            closeGalleryMenu();
+            item.action?.();
+        });
+        const onPointerDown = (event: PointerEvent) => {
+            if ((event.target as HTMLElement)?.closest?.(".pz-gallery-menu")) return;
+            closeGalleryMenu();
+            document.removeEventListener("pointerdown", onPointerDown, true);
+        };
+        window.setTimeout(() => {
+            document.addEventListener("pointerdown", onPointerDown, true);
+        }, 0);
+    };
+    const galleryHeightAt = (heights: number[] | undefined, index: number): number => heights?.[index] ?? GALLERY_CARD_ESTIMATE;
+
+    /** Style-style column virtualisation: only the visible slice (±overscan) is mounted. */
+    const updateGalleryVirtual = (force = false) => {
+        const state = galleryVirtual;
+        if (!state || !galleryRoot.isConnected) return;
+        const viewHeight = galleryRoot.clientHeight || galleryRoot.parentElement?.clientHeight || 600;
+        const scrollTop = galleryRoot.scrollTop;
+        const viewBottom = scrollTop + viewHeight;
+        for (const column of state.columns) {
+            const heights = state.heights.get(column.key) || [];
+            const groupTop = column.el.offsetTop;
+            const localTop = Math.max(0, scrollTop - groupTop - GALLERY_OVERSCAN);
+            let acc = 0;
+            let start = 0;
+            while (start < column.rows.length) {
+                const height = galleryHeightAt(heights, start);
+                if (acc + height > localTop) break;
+                acc += height;
+                start += 1;
+            }
+            const localBottom = viewBottom - groupTop + GALLERY_OVERSCAN;
+            let end = start;
+            let cursor = acc;
+            while (end < column.rows.length && cursor < localBottom) {
+                cursor += galleryHeightAt(heights, end);
+                end += 1;
+            }
+            // Layout may not be ready on first paint; never leave a column empty.
+            if (end === start && column.rows.length > start) {
+                end = Math.min(column.rows.length, start + 6);
+            }
+            const previous = state.ranges.get(column.key);
+            if (!force && previous && previous[0] === start && previous[1] === end) continue;
+            state.ranges.set(column.key, [start, end]);
+            let topSpace = 0;
+            for (let i = 0; i < start; i += 1) topSpace += galleryHeightAt(heights, i);
+            let bottomSpace = 0;
+            for (let i = end; i < column.rows.length; i += 1) bottomSpace += galleryHeightAt(heights, i);
+            column.windowEl.style.paddingTop = `${topSpace}px`;
+            column.windowEl.style.paddingBottom = `${bottomSpace}px`;
+            column.windowEl.innerHTML = column.rows.slice(start, end).map(state.cardHtml).join("");
+            const renderedCards = Array.from(column.windowEl.querySelectorAll<HTMLElement>(".pz-gallery-card"));
+            renderedCards.forEach((element, offset) => {
+                heights[start + offset] = element.offsetHeight;
+            });
+            state.heights.set(column.key, heights);
+            // Recompute spacers with the freshly measured heights so the column does not jump.
+            let measuredTop = 0;
+            for (let i = 0; i < start; i += 1) measuredTop += galleryHeightAt(heights, i);
+            let measuredBottom = 0;
+            for (let i = end; i < column.rows.length; i += 1) measuredBottom += galleryHeightAt(heights, i);
+            column.windowEl.style.paddingTop = `${measuredTop}px`;
+            column.windowEl.style.paddingBottom = `${measuredBottom}px`;
+        }
+        hydrateGalleryCovers();
+    };
+
+    const scheduleGalleryVirtual = () => {
+        if (galleryVirtualFrame) return;
+        galleryVirtualFrame = requestAnimationFrame(() => {
+            galleryVirtualFrame = 0;
+            updateGalleryVirtual();
+        });
+    };
+
+    const openGalleryRow = (row: MatrixRow): void => {
+        if (row.id.startsWith("zlib:")) void host.openZoteroItem(row.itemKey);
+        else openMatrixRow(host, project, row);
+    };
+
+    const galleryCoverRefFor = (row: MatrixRow): string => {
+        const attachment = attachmentForZoteroItem(host.store, row.itemKey);
+        return attachment ? `att:${attachment.id}` : `zot:${row.itemKey}`;
+    };
+
+    const toggleGallerySelection = (rowId: string): void => {
+        if (gallerySelected.has(rowId)) gallerySelected.delete(rowId);
+        else gallerySelected.add(rowId);
+        for (const cardEl of Array.from(galleryRoot.querySelectorAll<HTMLElement>(`.pz-gallery-card[data-row-id="${CSS.escape(rowId)}"]`))) {
+            cardEl.classList.toggle("is-selected", gallerySelected.has(rowId));
+        }
+    };
+
+    const openGalleryCropDialog = (row: MatrixRow): void => {
+        const ref = galleryCoverRefFor(row);
+        const holder = galleryRoot.querySelector<HTMLElement>(`[data-cover-ref="${CSS.escape(ref)}"]`);
+        const source = holder?.querySelector<HTMLImageElement>("img")?.src || galleryCovers.get(ref) || "";
+        if (!source) {
+            showMessage("封面还没生成，等它出现后再调整", 2500);
+            return;
+        }
+        let value = readGalleryCrop(row.itemKey);
+        const dialog = new Dialog({
+            title: "封面位置",
+            width: "420px",
+            content: `<div class="b3-dialog__content">
+  <div class="pz-gallery-crop-preview"><img src="${source}" style="object-position:center ${value}%" /></div>
+  <div class="fn__flex" style="align-items:center;gap:8px;margin-top:8px"><span class="pz-muted">上移</span><input type="range" min="0" max="100" value="${value}" data-crop-range style="flex:1" /><span class="pz-muted">下移</span></div>
+</div>
+<div class="b3-dialog__action"><button class="b3-button b3-button--text" data-act="crop-done">完成</button></div>`,
+        });
+        const range = dialog.element.querySelector<HTMLInputElement>("[data-crop-range]")!;
+        const preview = dialog.element.querySelector<HTMLImageElement>(".pz-gallery-crop-preview img")!;
+        const apply = () => {
+            value = Number(range.value) || 0;
+            preview.style.objectPosition = `center ${value}%`;
+            writeGalleryCrop(row.itemKey, value);
+            for (const target of Array.from(galleryRoot.querySelectorAll<HTMLElement>(`[data-item-key="${CSS.escape(row.itemKey)}"] img`))) {
+                target.style.objectPosition = `center ${value}%`;
+            }
+        };
+        range.addEventListener("input", apply);
+        dialog.element.querySelector('[data-act="crop-done"]')?.addEventListener("click", () => dialog.destroy());
+    };
+
+    const renderItemsGallery = (rows: MatrixRow[]) => {
+        const zoteroItems = new Map(host.store.state.zotero.items.map(item => [item.key, item]));
+        const attachmentsByKey = new Map<string, string>();
+        for (const attachment of Object.values(host.store.state.attachments)) {
+            const key = attachment.zotero?.itemKey;
+            if (key && !attachmentsByKey.has(key)) attachmentsByKey.set(key, attachment.id);
+        }
+        const statuses: Array<{value: "" | ReadingStatus; label: string}> = [
+            {value: "", label: "全部"},
+            {value: "unread", label: "未读"},
+            {value: "reading", label: "在读"},
+            {value: "done", label: "已读"},
+        ];
+        galleryStatusBar.innerHTML = statuses.map(item => `<button class="pz-gallery-status-btn${galleryStatusFilter === item.value ? " is-active" : ""}" data-gallery-status="${item.value}">${item.label}</button>`).join("");
+        for (const button of Array.from(galleryStatusBar.querySelectorAll<HTMLElement>("[data-gallery-status]"))) {
+            button.addEventListener("click", () => {
+                galleryStatusFilter = (button.dataset.galleryStatus || "") as "" | ReadingStatus;
+                renderGallery();
+            });
+        }
+        galleryGroupSelect.innerHTML = GALLERY_GROUP_OPTIONS.map(option => `<option value="${option.value}" ${gallerySettings.groupBy === option.value ? "selected" : ""}>按${option.label}分列</option>`).join("");
+
+        const groups = new Map<string, {label: string; rows: MatrixRow[]}>();
+        for (const row of gallerySortedRows(rows)) {
+            const attachmentId = attachmentsByKey.get(row.itemKey) || "";
+            const status = attachmentId ? statusForStat(host.store, host.store.readingStat(attachmentId)) : "unread";
+            if (galleryStatusFilter && status !== galleryStatusFilter) continue;
+            const group = galleryGroupFor(row, zoteroItems);
+            const entry = groups.get(group.key) || {label: group.label, rows: []};
+            entry.rows.push(row);
+            groups.set(group.key, entry);
+        }
+        const ordered = [...groups.entries()].sort((a, b) => {
+            if (a[0] === "未填写") return 1;
+            if (b[0] === "未填写") return -1;
+            if (gallerySettings.groupBy === "itemType") {
+                const order = ["conferencePaper", "journalArticle", "preprint", "thesis", "bookSection", "book", "report", "webpage", "patent", "document", "computerProgram"];
+                const left = order.indexOf(a[0]);
+                const right = order.indexOf(b[0]);
+                return (left < 0 ? 99 : left) - (right < 0 ? 99 : right);
+            }
+            return b[1].rows.length - a[1].rows.length;
+        });
+        const shown = ordered.reduce((sum, [, group]) => sum + group.rows.length, 0);
+        galleryCount.textContent = `${gallerySettings.scope === "library" ? "全库" : "矩阵"} · ${ordered.length} 组 · ${shown} 篇`;
+
+        const card = (row: MatrixRow): string => {
+            const attachmentId = attachmentsByKey.get(row.itemKey) || "";
+            const item = zoteroItems.get(row.itemKey);
+            const meta = host.store.itemMeta(row.itemKey);
+            const coverRef = gallerySettings.covers ? (attachmentId ? `att:${attachmentId}` : `zot:${row.itemKey}`) : "";
+            const authors = String(row.values.authors || "").split(";").filter(Boolean).slice(0, 2).join(", ");
+            const tags = row.id.startsWith("zlib:") ? [] : matrixRowTags(project, row);
+            const horizontal = gallerySettings.layout === "horizontal";
+            return `<article class="pz-gallery-card${horizontal ? " is-horizontal" : ""}${gallerySelected.has(row.id) ? " is-selected" : ""}" tabindex="0" data-row-id="${escapeHtml(row.id)}">
+  <div class="pz-gallery-cover${coverRef ? " is-loading" : " is-off"}"${coverRef ? ` data-cover-ref="${escapeHtml(coverRef)}" data-item-key="${escapeHtml(row.itemKey)}"` : ""}><span class="pz-gallery-cover-fallback">${coverRef ? "" : "封面已关闭"}</span></div>
+  <div class="pz-gallery-info">
+    <div class="pz-gallery-title"><span class="pz-gallery-kind">${galleryKindIcon(item?.itemType || "")}</span>${escapeHtml(rowTitle(row))}</div>
+    ${authors ? `<div class="pz-gallery-line">👤 ${escapeHtml(authors)}</div>` : ""}
+    ${row.values.year ? `<div class="pz-gallery-line">📅 ${escapeHtml(String(row.values.year))}</div>` : ""}
+    ${row.values.venue ? `<div class="pz-gallery-line">🏛 ${escapeHtml(String(row.values.venue))}</div>` : ""}
+    ${tags.length ? `<div class="pz-gallery-tags"><i class="pz-gallery-tagicon">🏷</i>${tags.slice(0, 3).map(tag => `<span>${escapeHtml(tag)}</span>`).join("")}${tags.length > 3 ? `<span class="is-more">+${tags.length - 3}</span>` : ""}</div>` : ""}
+    ${meta?.remark ? `<div class="pz-gallery-remark">${escapeHtml(meta.remark)}</div>` : ""}
+  </div>
+</article>`;
+        };
+
+        galleryRoot.innerHTML = `<div class="pz-gallery-columns">${ordered.map(([key, group], index) => `<section class="pz-gallery-group is-c${(index % 7) + 1}" data-gallery-group-key="${escapeHtml(key)}">
+  <header class="pz-gallery-group-head"><span>${escapeHtml(group.label)}</span><em>${group.rows.length}</em></header>
+  <div class="pz-gallery-window" data-gallery-window="${escapeHtml(key)}"></div>
+</section>`).join("")}${ordered.length ? "" : `<div class="pz-muted" style="padding:24px">没有匹配的文献</div>`}</div>`;
+        const columns: GalleryVirtualColumn[] = [];
+        for (const [key, group] of ordered) {
+            const el = galleryRoot.querySelector<HTMLElement>(`[data-gallery-group-key="${CSS.escape(key)}"]`);
+            const windowEl = el?.querySelector<HTMLElement>("[data-gallery-window]");
+            if (!el || !windowEl) continue;
+            columns.push({key, rows: group.rows, el, windowEl});
+        }
+        galleryVirtual = {
+            columns,
+            heights: new Map(),
+            ranges: new Map(),
+            rowsById: new Map(rows.map(row => [row.id, row])),
+            cardHtml: card,
+        };
+        galleryRoot.scrollTop = galleryScroll.top;
+        galleryRoot.scrollLeft = galleryScroll.left;
+        // First paint often measures 0 while the dialog is still laying out; retry next frames.
+        requestAnimationFrame(() => {
+            updateGalleryVirtual(true);
+            requestAnimationFrame(() => updateGalleryVirtual(true));
+        });
+    };
+
+    const renderAnnotationsGallery = (rows: MatrixRow[]) => {
+        const attachmentIds = new Map<string, string>();
+        for (const row of rows) {
+            const attachment = attachmentForZoteroItem(host.store, row.itemKey);
+            if (attachment) attachmentIds.set(attachment.id, rowTitle(row));
+        }
+        const colors = new Map<string, string>();
+        const annotations = Object.values(host.store.state.annotations).filter(annotation => {
+            if (!attachmentIds.has(annotation.attachmentId)) return false;
+            colors.set(annotation.color, annotation.color);
+            return !gallerySettings.colorFilter || annotation.color === gallerySettings.colorFilter;
+        }).sort((a, b) => b.createdAt - a.createdAt);
+        setGalleryTabCount("annotations", annotations.length);
+        const visibleAnnotations = annotations.slice(0, 150);
+        const colorChips = `<button class="pz-gallery-color is-all${gallerySettings.colorFilter ? "" : " is-active"}" data-gallery-color="">全部</button>` + Array.from(colors.keys()).map(color => `<button class="pz-gallery-color${gallerySettings.colorFilter === color ? " is-active" : ""}" data-gallery-color="${escapeHtml(color)}" style="--pz-dot:${escapeHtml(color)}"></button>`).join("");
+        galleryStatusBar.innerHTML = colorChips;
+        const cards = visibleAnnotations.map(annotation => `<article class="pz-gallery-card is-annotation" data-annotation-id="${escapeHtml(annotation.id)}" data-attachment-id="${escapeHtml(annotation.attachmentId)}" data-page="${annotation.page}">
+  <div class="pz-gallery-ann-bar" style="background:${escapeHtml(annotation.color)}"></div>
+  <div class="pz-gallery-ann-text">${escapeHtml(annotation.text || "(空标注)")}</div>
+  ${annotation.translation ? `<div class="pz-gallery-ann-trans">${escapeHtml(annotation.translation)}</div>` : ""}
+  <div class="pz-gallery-meta">第 ${annotation.page} 页 · ${escapeHtml(attachmentIds.get(annotation.attachmentId) || "")}</div>
+</article>`).join("");
+        galleryRoot.innerHTML = `<div class="pz-gallery-ann-grid">${cards || `<div class="pz-muted" style="padding:24px">当前范围没有标注</div>`}${annotations.length > visibleAnnotations.length ? `<div class="pz-muted" style="padding:8px">仅显示最近 ${visibleAnnotations.length} 条（共 ${annotations.length} 条）</div>` : ""}</div>`;
+        for (const card of Array.from(galleryRoot.querySelectorAll<HTMLElement>(".pz-gallery-card.is-annotation"))) {
+            card.addEventListener("dblclick", () => {
+                const attachment = host.store.getAttachment(card.dataset.attachmentId || "");
+                if (!attachment) return;
+                host.openAttachment(attachment, Number(card.dataset.page) || 1, card.dataset.annotationId || "");
+            });
+        }
+        for (const chip of Array.from(galleryRoot.parentElement!.querySelectorAll<HTMLElement>("[data-gallery-color]"))) {
+            chip.addEventListener("click", () => {
+                gallerySettings = {...gallerySettings, colorFilter: chip.dataset.galleryColor || ""};
+                saveGalleryPrefs(gallerySettings);
+                renderGallery();
+            });
+        }
+    };
+
+    const renderNotesGallery = (rows: MatrixRow[]) => {
+        const itemKeys = new Set(rows.map(row => row.itemKey));
+        const docs = new Map<string, string>();
+        for (const link of Object.values(host.store.state.templateNotes)) {
+            if (link.itemKey && itemKeys.has(link.itemKey) && link.docId) docs.set(link.docId, link.itemKey);
+        }
+        const attachmentIds = new Set<string>();
+        for (const row of rows) {
+            const attachment = attachmentForZoteroItem(host.store, row.itemKey);
+            if (attachment) attachmentIds.add(attachment.id);
+        }
+        for (const link of Object.values(host.store.state.noteLinks)) {
+            const annotation = host.store.getAnnotation(link.annotationId);
+            if (annotation && attachmentIds.has(annotation.attachmentId) && link.siyuanDocId) {
+                docs.set(link.siyuanDocId, annotation.attachmentId);
+            }
+        }
+        galleryStatusBar.innerHTML = "";
+        setGalleryTabCount("notes", docs.size);
+        const docEntries = Array.from(docs.entries()).slice(0, 120);
+        const cards = docEntries.map(([docId, source]) => `<article class="pz-gallery-card is-note" data-doc-id="${escapeHtml(docId)}">
+  <div class="pz-gallery-note-icon">📝</div>
+  <div class="pz-gallery-title" data-note-title="${escapeHtml(docId)}">${escapeHtml(noteTitles.get(docId) || "加载中…")}</div>
+  <div class="pz-gallery-meta">${escapeHtml(source)}</div>
+</article>`).join("");
+        galleryRoot.innerHTML = `<div class="pz-gallery-note-grid">${cards || `<div class="pz-muted" style="padding:24px">当前范围没有笔记</div>`}${docs.size > docEntries.length ? `<div class="pz-muted" style="padding:8px">仅显示前 ${docEntries.length} 条（共 ${docs.size} 条）</div>` : ""}</div>`;
+        for (const card of Array.from(galleryRoot.querySelectorAll<HTMLElement>(".pz-gallery-card.is-note"))) {
+            card.addEventListener("dblclick", () => host.openDoc(card.dataset.docId || ""));
+        }
+        for (const titleEl of Array.from(galleryRoot.querySelectorAll<HTMLElement>("[data-note-title]"))) {
+            const docId = titleEl.dataset.noteTitle || "";
+            if (!docId || noteTitles.has(docId)) continue;
+            void getBlockAttrs(docId).then(attrs => {
+                const title = String((attrs as any)?.title || (attrs as any)?.name || docId);
+                noteTitles.set(docId, title);
+                titleEl.textContent = title;
+            }).catch(() => {
+                noteTitles.set(docId, docId);
+                titleEl.textContent = docId;
+            });
+        }
+    };
+
+    /** Gallery source: whole Zotero library by default, or the current matrix rows. */
+    const gallerySourceRows = (): MatrixRow[] => {
+        if (gallerySettings.scope === "project") return filteredRows();
+        const cache = host.store.state.zotero;
+        const query = filter.value.trim().toLowerCase();
+        const rows: MatrixRow[] = (cache.items || []).map(item => {
+            const csl = (item.csl || {}) as Record<string, any>;
+            return {
+                id: `zlib:${item.key}`,
+                libraryId: cache.libraryId || 0,
+                itemKey: item.key,
+                values: {
+                    title: item.title || csl.title || "",
+                    authors: (item.creators || []).join("; "),
+                    year: item.year || "",
+                    venue: csl["container-title"] || "",
+                    doi: item.doi || csl.DOI || "",
+                },
+            };
+        });
+        if (!query) return rows;
+        return rows.filter(row => Object.values(row.values).join(" ").toLowerCase().includes(query));
+    };
+
+    const setGalleryTabCount = (mode: GallerySettings["mode"], count: number) => {
+        const button = dialog.element.querySelector<HTMLElement>(`[data-gallery-mode="${mode}"]`);
+        if (!button) return;
+        const label = mode === "items" ? "条目" : mode === "notes" ? "笔记" : "标注";
+        button.textContent = `${label} ${count}`;
+    };
+
+    const renderGallery = () => {
+        if (currentKind === "gallery") {
+            galleryScroll = {top: galleryRoot.scrollTop, left: galleryRoot.scrollLeft};
+        }
+        for (const button of Array.from(dialog.element.querySelectorAll<HTMLElement>("[data-gallery-mode]"))) {
+            button.classList.toggle("is-active", button.dataset.galleryMode === gallerySettings.mode);
+        }
+        galleryGroupSelect.hidden = gallerySettings.mode !== "items";
+        galleryScopeSelect.value = gallerySettings.scope;
+        const rows = gallerySourceRows();
+        if (gallerySettings.mode === "notes") {
+            galleryStatusBar.innerHTML = "";
+            galleryCount.textContent = "";
+            galleryVirtual = null;
+            renderNotesGallery(rows);
+            return;
+        }
+        if (gallerySettings.mode === "annotations") {
+            galleryCount.textContent = "";
+            galleryVirtual = null;
+            renderAnnotationsGallery(rows);
+            return;
+        }
+        setGalleryTabCount("items", rows.length);
+        renderItemsGallery(rows);
+    };
+
+    const openGallerySettings = () => {
+        const columns = project.columns.filter(column => column.visible && column.id !== "title" && column.id !== "authors");
+        const editor = new Dialog({
+            title: "画廊显示设置",
+            width: "520px",
+            content: `<div class="b3-dialog__content">
+  <div class="pz-muted" style="margin-bottom:10px">只影响画廊呈现，不改写文献字段。</div>
+  <div style="margin-bottom:10px"><b>卡片字段</b><div class="pz-gallery-field-list">${columns.map(column => `<label><input type="checkbox" data-gallery-field="${escapeHtml(column.id)}" ${gallerySettings.fields.includes(column.id) ? "checked" : ""}/> ${escapeHtml(column.name)}</label>`).join("")}</div></div>
+  <label style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><input type="checkbox" data-gallery-setting="covers" ${gallerySettings.covers ? "checked" : ""}/> 显示封面（关闭后明显更流畅）</label>
+  <div class="fn__flex" style="gap:12px;margin-bottom:10px">
+    <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>排序</span><select class="b3-select" data-gallery-setting="sort"><option value="">不排序</option>${project.columns.filter(column => column.visible).map(column => `<option value="${escapeHtml(column.id)}" ${gallerySettings.sortColumn === column.id ? "selected" : ""}>${escapeHtml(column.name)}</option>`).join("")}</select></label>
+    <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>方向</span><select class="b3-select" data-gallery-setting="direction"><option value="desc" ${gallerySettings.sortDirection === "desc" ? "selected" : ""}>降序</option><option value="asc" ${gallerySettings.sortDirection === "asc" ? "selected" : ""}>升序</option></select></label>
+  </div>
+</div>
+<div class="b3-dialog__action"><button class="b3-button b3-button--cancel" data-act="gallery-cancel">取消</button><div class="fn__space"></div><button class="b3-button b3-button--text" data-act="gallery-save">保存</button></div>`,
+        });
+        editor.element.querySelector('[data-act="gallery-cancel"]')?.addEventListener("click", () => editor.destroy());
+        editor.element.querySelector('[data-act="gallery-save"]')?.addEventListener("click", () => {
+            const fields = Array.from(editor.element.querySelectorAll<HTMLInputElement>("[data-gallery-field]"))
+                .filter(input => input.checked)
+                .map(input => input.dataset.galleryField || "");
+            const layout = gallerySettings.layout;
+            const sortColumn = editor.element.querySelector<HTMLSelectElement>('[data-gallery-setting="sort"]')?.value || "";
+            const sortDirection = (editor.element.querySelector<HTMLSelectElement>('[data-gallery-setting="direction"]')?.value || "desc") as GallerySettings["sortDirection"];
+            const covers = Boolean(editor.element.querySelector<HTMLInputElement>('[data-gallery-setting="covers"]')?.checked);
+            gallerySettings = {...gallerySettings, fields, layout, sortColumn, sortDirection, covers};
+            saveGalleryPrefs(gallerySettings);
+            editor.destroy();
+            renderGallery();
+        });
+    };
+
     const renderPane = () => {
-        for (const kind of ["table", "kanban", "canvas"] as MatrixViewKind[]) {
-            const pane = kind === "table" ? tablePane : kind === "kanban" ? kanbanPane : canvasPane;
+        const panes: Array<[MatrixViewKind, HTMLElement]> = [
+            ["table", tablePane],
+            ["kanban", kanbanPane],
+            ["gallery", galleryPane],
+            ["canvas", canvasPane],
+        ];
+        for (const [kind, pane] of panes) {
             pane.hidden = currentKind !== kind;
             const tab = dialog.element.querySelector<HTMLElement>(`[data-matrix-kind="${kind}"]`);
             tab?.classList.toggle("is-active", currentKind === kind);
         }
         if (currentKind === "table") renderTable();
         else if (currentKind === "kanban") renderKanban();
+        else if (currentKind === "gallery") renderGallery();
         else renderCanvas();
     };
     const render = () => {
+        syncReadingValues(host.store, project);
         updateStatus();
         renderPane();
     };
@@ -1467,6 +2316,7 @@ export function openMatrix(host: PluginHost): Dialog {
         workingFilters = [];
         currentFilterLogic = "and";
         selectedRows.clear();
+        galleryStatusFilter = "";
         void host.store.save();
         renderProjects();
         renderViewSelect();
@@ -1475,14 +2325,175 @@ export function openMatrix(host: PluginHost): Dialog {
     });
     for (const tab of Array.from(dialog.element.querySelectorAll<HTMLElement>("[data-matrix-kind]"))) {
         tab.addEventListener("click", () => {
-            currentKind = (tab.dataset.matrixKind === "kanban" || tab.dataset.matrixKind === "canvas" ? tab.dataset.matrixKind : "table") as MatrixViewKind;
+            const kind = tab.dataset.matrixKind;
+            currentKind = (kind === "kanban" || kind === "canvas" || kind === "gallery" ? kind : "table") as MatrixViewKind;
             currentViewId = "";
             workingView = null;
             renderViewSelect();
             renderPane();
         });
     }
-    filter.addEventListener("input", () => { renderTable(); if (currentKind === "kanban") renderKanban(); else if (currentKind === "canvas") renderCanvas(); });
+    for (const button of Array.from(dialog.element.querySelectorAll<HTMLElement>("[data-gallery-mode]"))) {
+        button.addEventListener("click", () => {
+            gallerySettings = {...gallerySettings, mode: (button.dataset.galleryMode as GallerySettings["mode"]) || "items"};
+            saveGalleryPrefs(gallerySettings);
+            renderGallery();
+        });
+    }
+    galleryGroupSelect.addEventListener("change", () => {
+        gallerySettings = {...gallerySettings, groupBy: galleryGroupSelect.value as GallerySettings["groupBy"]};
+        saveGalleryPrefs(gallerySettings);
+        renderGallery();
+    });
+    galleryScopeSelect.addEventListener("change", () => {
+        gallerySettings = {...gallerySettings, scope: galleryScopeSelect.value === "project" ? "project" : "library"};
+        saveGalleryPrefs(gallerySettings);
+        renderGallery();
+    });
+    galleryRoot.addEventListener("scroll", () => scheduleGalleryVirtual(), {passive: true});
+    if (typeof ResizeObserver !== "undefined") {
+        const galleryResize = new ResizeObserver(() => {
+            if (currentKind === "gallery") scheduleGalleryVirtual();
+        });
+        galleryResize.observe(galleryRoot);
+    }
+    galleryRoot.addEventListener("click", event => {
+        const cardEl = (event.target as HTMLElement).closest<HTMLElement>(".pz-gallery-card[data-row-id]");
+        if (!cardEl || !galleryVirtual) return;
+        const row = galleryVirtual.rowsById.get(cardEl.dataset.rowId || "");
+        if (!row) return;
+        if (event.ctrlKey || event.metaKey) {
+            event.preventDefault();
+            toggleGallerySelection(row.id);
+            return;
+        }
+        openGalleryRow(row);
+    });
+    galleryRoot.addEventListener("dblclick", event => {
+        const cardEl = (event.target as HTMLElement).closest<HTMLElement>(".pz-gallery-card[data-row-id]");
+        if (!cardEl || !galleryVirtual) return;
+        const row = galleryVirtual.rowsById.get(cardEl.dataset.rowId || "");
+        if (!row) return;
+        if (row.id.startsWith("zlib:")) {
+            void host.openZoteroItem(row.itemKey);
+            return;
+        }
+        const attachment = attachmentForZoteroItem(host.store, row.itemKey);
+        if (attachment) host.openAttachment(attachment);
+    });
+    const handleGalleryContextMenu = (event: MouseEvent): void => {
+        const target = event.target as Node | null;
+        if (!target || !galleryRoot.contains(target)) return;
+        if (currentKind !== "gallery" || !galleryRoot.isConnected) return;
+        if (Date.now() - galleryMenuOpenedAt < 250) return;
+        galleryMenuOpenedAt = Date.now();
+        event.preventDefault();
+        event.stopPropagation();
+        const cardEl = (event.target as HTMLElement).closest<HTMLElement>(".pz-gallery-card[data-row-id]");
+        if (cardEl && galleryVirtual) {
+            const row = galleryVirtual.rowsById.get(cardEl.dataset.rowId || "");
+            if (!row) return;
+            const ref = galleryCoverRefFor(row);
+            const hasCover = Boolean(galleryCovers.get(ref)) || Boolean(galleryRoot.querySelector(`[data-cover-ref="${CSS.escape(ref)}"] img`));
+            showGalleryMenu(event.clientX, event.clientY, [
+                {label: "打开原文", action: () => openGalleryRow(row)},
+                {label: "在矩阵中打开", disabled: row.id.startsWith("zlib:"), action: () => openMatrixRow(host, project, row)},
+                {label: "-"},
+                {label: "调整封面位置…", disabled: !hasCover, action: () => openGalleryCropDialog(row)},
+                {label: "恢复默认封面位置", disabled: !readGalleryCrop(row.itemKey), action: () => {
+                    writeGalleryCrop(row.itemKey, 0);
+                    renderGallery();
+                }},
+                {label: "-"},
+                {label: "复制", children: [
+                    {label: "复制标题", action: () => void copyToClipboard(rowTitle(row), "标题")},
+                    {label: "复制 DOI", disabled: !row.values.doi, action: () => void copyToClipboard(String(row.values.doi || ""), " DOI")},
+                    {label: "复制作者", disabled: !row.values.authors, action: () => void copyToClipboard(String(row.values.authors || ""), "作者")},
+                    {label: "复制 BibTeX", action: () => void copyToClipboard(rowBibtex(row), " BibTeX")},
+                ]},
+            ]);
+            return;
+        }
+        const groupEl = (event.target as HTMLElement).closest<HTMLElement>(".pz-gallery-group");
+        if (!groupEl) return;
+        showGalleryMenu(event.clientX, event.clientY, [
+            ...GALLERY_GROUP_OPTIONS.map(option => ({
+                label: `按${option.label}分列`,
+                checked: gallerySettings.groupBy === option.value,
+                action: () => {
+                    gallerySettings = {...gallerySettings, groupBy: option.value};
+                    saveGalleryPrefs(gallerySettings);
+                    renderGallery();
+                },
+            })),
+            {label: "-"},
+            {label: "竖向卡片", checked: gallerySettings.layout !== "horizontal", action: () => {
+                gallerySettings = {...gallerySettings, layout: "vertical"};
+                saveGalleryPrefs(gallerySettings);
+                renderGallery();
+            }},
+            {label: "横向卡片", checked: gallerySettings.layout === "horizontal", action: () => {
+                gallerySettings = {...gallerySettings, layout: "horizontal"};
+                saveGalleryPrefs(gallerySettings);
+                renderGallery();
+            }},
+            {label: "-"},
+            {label: gallerySettings.covers ? "隐藏封面" : "显示封面", action: () => {
+                gallerySettings = {...gallerySettings, covers: !gallerySettings.covers};
+                saveGalleryPrefs(gallerySettings);
+                renderGallery();
+            }},
+            {label: "-"},
+            {label: "按年份降序", checked: gallerySettings.sortColumn === "year" && gallerySettings.sortDirection === "desc", action: () => {
+                gallerySettings = {...gallerySettings, sortColumn: "year", sortDirection: "desc"};
+                saveGalleryPrefs(gallerySettings);
+                renderGallery();
+            }},
+            {label: "按标题升序", checked: gallerySettings.sortColumn === "title" && gallerySettings.sortDirection === "asc", action: () => {
+                gallerySettings = {...gallerySettings, sortColumn: "title", sortDirection: "asc"};
+                saveGalleryPrefs(gallerySettings);
+                renderGallery();
+            }},
+        ]);
+    };
+    window.addEventListener("contextmenu", handleGalleryContextMenu, true);
+    window.addEventListener("mousedown", event => {
+        if (event.button === 2) handleGalleryContextMenu(event);
+    }, true);
+    galleryRoot.addEventListener("keydown", event => {
+        if (currentKind !== "gallery" || !galleryVirtual) return;
+        const cards = Array.from(galleryRoot.querySelectorAll<HTMLElement>(".pz-gallery-card[data-row-id]"));
+        if (!cards.length) return;
+        const current = cards.indexOf(document.activeElement as HTMLElement);
+        const focusAt = (index: number) => {
+            const target = cards[Math.max(0, Math.min(cards.length - 1, index))];
+            target?.focus();
+        };
+        if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+            event.preventDefault();
+            focusAt(current < 0 ? 0 : current + 1);
+        } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+            event.preventDefault();
+            focusAt(current < 0 ? 0 : current - 1);
+        } else if (event.key === "Enter" && current >= 0) {
+            event.preventDefault();
+            const row = galleryVirtual.rowsById.get(cards[current].dataset.rowId || "");
+            if (row) openGalleryRow(row);
+        } else if (event.key === " " && current >= 0) {
+            event.preventDefault();
+            const id = cards[current].dataset.rowId || "";
+            if (id) toggleGallerySelection(id);
+        } else if (event.key === "Escape") {
+            dialog.destroy();
+        }
+    });
+    dialog.element.querySelector('[data-act="gallery-settings"]')?.addEventListener("click", () => openGallerySettings());
+    filter.addEventListener("input", () => {
+        renderTable();
+        if (currentKind === "kanban") renderKanban();
+        else if (currentKind === "canvas") renderCanvas();
+        else if (currentKind === "gallery") renderGallery();
+    });
     sortColumn.addEventListener("change", () => { currentSortColumn = sortColumn.value; render(); });
     sortDirection.addEventListener("change", () => { currentSortDirection = sortDirection.value === "desc" ? "desc" : "asc"; render(); });
     groupColumn.addEventListener("change", () => { currentGroupColumn = groupColumn.value; render(); });

@@ -8,7 +8,7 @@ import {TRANSLATION_TARGETS, translateText} from "../translation/service";
 import {checkPdf2zhEnvironment, ensurePdf2zhServer} from "../translation/pdf2zh";
 import {checkDoc2xEnvironment, fetchDoc2xModelList} from "../translation/doc2x";
 import {clearParseLibrary, enforceParseLimits, loadParseLibrary, removeParseRecord} from "../doc2x/library";
-import {checkOcrEngineEnvironment, checkOcrEnvironment, ensureOcrEngine, restartOcrEngine, stopOcrEngine} from "../ocr/service";
+import {checkOcrEngineEnvironment, checkOcrEnvironment, ensureOcrEngine, prewarmOcr, restartOcrEngine, stopOcrEngine} from "../ocr/service";
 import {defaultFormulaOrder, engineConfig, isOcrEngineId, normalizeDirKey, OCR_ENGINE_DEFS, OCR_ENGINE_IDS} from "../ocr/engines";
 import {detectOcrBundle, detectPdf2zhServer, discoverBundles, isBundleCompatible, readBundleLogTail} from "../ocr/bundles";
 import {getOcrHealth} from "../ocr/client";
@@ -214,6 +214,28 @@ export function openSettings(host: PluginHost): void {
       <label class="fn__flex" style="flex-direction:column;gap:4px;margin-bottom:12px"><span>摘录可见模板</span><textarea class="b3-text-field fn__block" data-field="excerptTemplate" rows="3" style="resize:vertical">${escapeHtml(settings.excerptTemplate || "{text}")}</textarea><span class="pz-help">支持 {text}、{page}、{title}；链接身份始终是结构化 annotation URL。</span></label>
       <label class="fn__flex" style="flex-direction:column;gap:4px"><span>默认引用样式</span><select class="b3-select fn__block" data-field="citationStyle">${citationStyleOptions(settings.defaultCitationStyle)}</select><span class="pz-help">参考文献通过 CSL 引擎生成。</span></label>
     </div>
+    <div class="pz-ocr-section">
+      <div class="pz-ocr-section-title">阅读统计</div>
+      <label style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><input type="checkbox" data-field="readingTrackEnabled" ${settings.readingTrackEnabled !== false ? "checked" : ""}/> 记录阅读时长与进度</label>
+      <div class="fn__flex" style="gap:8px">
+        <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>闲置多久停止计时（秒）</span><input class="b3-text-field fn__block" type="number" min="10" max="1800" data-field="readingIdleSeconds" value="${settings.readingIdleSeconds || 120}" /></label>
+        <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>判定「已读」的进度（%）</span><input class="b3-text-field fn__block" type="number" min="50" max="100" data-field="readingDoneRatio" value="${Math.round((settings.readingDoneRatio || 0.95) * 100)}" /></label>
+      </div>
+      <div class="pz-help">只写入插件自己的数据，不修改 PDF，也不写 Zotero。窗口失焦或无操作超过该秒数时暂停计时。</div>
+    </div>
+    <div class="pz-ocr-section">
+      <div class="pz-ocr-section-title">期刊标签（easyScholar）</div>
+      <label class="fn__flex" style="flex-direction:column;gap:4px;margin-bottom:10px"><span>easyScholar 密钥</span><input class="b3-text-field fn__block" data-field="journalApiKey" value="${escapeHtml(settings.journalApiKey || "")}" placeholder="在 easyScholar 后台 → 开放接口 获取" /><span class="pz-help">留空则关闭期刊标签；查询结果按刊名缓存 30 天。</span></label>
+      <div class="fn__flex" style="gap:8px">
+        <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>显示字段</span><input class="b3-text-field fn__block" data-field="journalFields" value="${escapeHtml(settings.journalFields || "sci,sciif,eii")}" placeholder="sci,sciif,ccf" /></label>
+        <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>显示映射</span><input class="b3-text-field fn__block" data-field="journalMap" value="${escapeHtml(settings.journalMap || "")}" placeholder="SCIIF=IF, SCI=" /></label>
+      </div>
+      <div class="pz-help">在文献列表右键「获取期刊标签」写入缓存；矩阵的「期刊标签」列会显示结果。</div>
+    </div>
+    <div class="pz-ocr-section">
+      <div class="pz-ocr-section-title">文献网络（OpenAlex）</div>
+      <label class="fn__flex" style="flex-direction:column;gap:4px"><span>OpenAlex API Key（可选，免费申请）</span><input class="b3-text-field fn__block" data-field="openAlexApiKey" value="${escapeHtml(settings.openAlexApiKey || "")}" placeholder="不填则共用公共额度，容易限流" /><span class="pz-help">在文献右键菜单选择「文献网络」即可按 Connected Papers 的方式展开先期 / 衍生工作。</span></label>
+    </div>
   </section>
 
   <section class="pz-settings-page" data-settings-page="translation">
@@ -334,7 +356,7 @@ export function openSettings(host: PluginHost): void {
         <label class="fn__flex" style="flex-direction:column;gap:4px;margin-top:8px"><span>共享 Python 运行时目录（可选）</span><div style="display:flex;gap:6px"><input class="b3-text-field fn__block" data-field="ocrSharedRuntimeDir" value="${escapeHtml(settings.ocrSharedRuntimeDir)}" placeholder="例如 D:\\SiYuan\\OCR-Runtime" style="flex:1" /><button class="b3-button b3-button--outline" data-act="ocr-shared-runtime-pick" style="flex:0 0 auto">选择目录</button></div><span class="pz-help">留空使用引擎包内自带 runtime。</span></label>
         <label class="fn__flex" style="flex-direction:column;gap:4px;margin-top:6px"><span>自定义启动命令（可选）</span><input class="b3-text-field fn__block" data-field="ocrStartCommand" value="${escapeHtml(settings.ocrStartCommand)}" placeholder="留空按目录内脚本自动启动" /><span class="pz-help">一般留空即可；只有引擎包启动脚本不标准时才填写。</span></label>
       </div>
-      <div class="pz-ocr-actions" style="margin-top:8px"><button class="b3-button b3-button--outline" data-act="ocr-check">检测全部引擎</button><button class="b3-button b3-button--outline" data-act="ocr-auto-index">自动检测服务包</button></div>
+      <div class="pz-ocr-actions" style="margin-top:8px"><button class="b3-button b3-button--outline" data-act="ocr-check">检测全部引擎</button><button class="b3-button b3-button--outline" data-act="ocr-auto-index">自动检测服务包</button><button class="b3-button b3-button--outline" data-act="ocr-prewarm">预热 OCR 服务</button></div>
       <div data-role="ocr-env" class="pz-muted" style="font-size:12px;line-height:1.6"></div>
     </details>
     <details class="pz-ocr-section">
@@ -432,6 +454,10 @@ export function openSettings(host: PluginHost): void {
       <div class="fn__flex" style="gap:8px;margin-bottom:8px">
         <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>MFD 静态尺寸（可选）</span><input class="b3-text-field fn__block" data-field="ocrMfdStaticShape" value="${escapeHtml(settings.ocrMfdStaticShape)}" placeholder="例如 768 或 768x1024" /></label>
         <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>MFR 上下文（可选）</span><input class="b3-text-field fn__block" data-field="ocrMfrContext" value="${escapeHtml(settings.ocrMfrContext)}" placeholder="公式识别上下文" /></label>
+      </div>
+      <div class="fn__flex" style="gap:8px;margin-bottom:8px">
+        <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>启动预热</span><label style="display:flex;align-items:center;gap:6px;padding-top:4px"><input type="checkbox" data-field="ocrPrewarm" ${settings.ocrPrewarm !== false ? "checked" : ""}/> 插件启动后预热首选引擎</label><span class="pz-help">预热只启动公式首选 + 文本首选，不阻塞启动。</span></label>
+        <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>大图长边上限</span><select class="b3-select fn__block" data-field="ocrMaxImageEdge"><option value="1600" ${settings.ocrMaxImageEdge === 1600 ? "selected" : ""}>1600 px</option><option value="2200" ${settings.ocrMaxImageEdge === 2200 || !settings.ocrMaxImageEdge ? "selected" : ""}>2200 px（默认）</option><option value="3000" ${settings.ocrMaxImageEdge === 3000 ? "selected" : ""}>3000 px</option><option value="0" ${settings.ocrMaxImageEdge === 0 ? "selected" : ""}>不限制</option></select><span class="pz-help">超过后先缩小再 OCR，可显著加快 CPU 推理。</span></label>
       </div>
       <div class="fn__flex" style="gap:8px;margin-bottom:8px">
         <label class="fn__flex" style="flex:1;flex-direction:column;gap:4px"><span>Pix2Text 识别设备</span><select class="b3-select fn__block" data-field="ocrDevice"><option value="cpu" ${settings.ocrDevice === "cpu" ? "selected" : ""}>CPU</option><option value="cuda" ${settings.ocrDevice === "cuda" ? "selected" : ""}>CUDA</option><option value="auto" ${settings.ocrDevice === "auto" ? "selected" : ""}>自动</option></select></label>
@@ -665,6 +691,8 @@ export function openSettings(host: PluginHost): void {
             ocrDefaultAction: fieldValue("ocrDefaultAction") === "replace" || fieldValue("ocrDefaultAction") === "copy" || fieldValue("ocrDefaultAction") === "append" ? fieldValue("ocrDefaultAction") as Settings["ocrDefaultAction"] : "insert",
             ocrHistoryLimit: numberField("ocrHistoryLimit", 50, 1, 500),
             ocrPreview: checked("ocrPreview"),
+            ocrPrewarm: checked("ocrPrewarm"),
+            ocrMaxImageEdge: Math.max(0, Math.min(10000, numberField("ocrMaxImageEdge", 2200, 0, 10000))),
             ocrTimeoutMs: numberField("ocrTimeoutMs", 120000, 1000, 600000),
             ocrDevice: fieldValue("ocrDevice") === "cuda" || fieldValue("ocrDevice") === "auto" ? fieldValue("ocrDevice") as Settings["ocrDevice"] : "cpu",
             ocrEnableTable: checked("ocrEnableTable"),
@@ -699,6 +727,13 @@ export function openSettings(host: PluginHost): void {
             automationModelId: fieldValue("automationModelId"),
             automationMaxChars: numberField("automationMaxChars", 450, 120, 100000),
             automationDebug: checked("automationDebug"),
+            readingTrackEnabled: checked("readingTrackEnabled"),
+            readingIdleSeconds: numberField("readingIdleSeconds", 120, 10, 1800),
+            readingDoneRatio: Math.min(1, Math.max(0.5, numberField("readingDoneRatio", 95, 50, 100) / 100)),
+            journalApiKey: fieldValue("journalApiKey"),
+            journalFields: fieldValue("journalFields") || "sci,sciif,eii",
+            journalMap: fieldValue("journalMap"),
+            openAlexApiKey: fieldValue("openAlexApiKey"),
             // Legacy mirrors kept in sync so old code paths and stored exports stay valid.
             ocrServerPath: readEngineConfig("pix2text").dir,
             ocrPort: readEngineConfig("pix2text").port,
@@ -933,6 +968,15 @@ export function openSettings(host: PluginHost): void {
         }
     };
     root.querySelector('[data-act="ocr-auto-index"]')?.addEventListener("click", () => { void autoFillBundles(true); });
+    root.querySelector('[data-act="ocr-prewarm"]')?.addEventListener("click", async () => {
+        showMessage("正在预热 OCR 服务（模型加载可能需要 1–3 分钟）…", 4000);
+        const results = await prewarmOcr(probeSettings());
+        const summary = results.map(item => `${OCR_ENGINE_DEFS[item.engine].name}:${item.ok ? "就绪" : (item.error || "失败")}`).join("；");
+        showMessage(summary || "没有需要预热的引擎", 6000, results.some(item => !item.ok) ? "error" : undefined);
+        for (const result of results) {
+            if (result.ok) setStatus(result.engine, "已预热", "ok");
+        }
+    });
     root.querySelector('[data-act="pdf2zh-auto-index"]')?.addEventListener("click", () => { void autoFillBundles(true); });
 
     // ---- translation ----------------------------------------------------

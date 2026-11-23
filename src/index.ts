@@ -19,7 +19,7 @@ import {pdfjsLib} from "./pdf/pdfjs";
 import {ZoteroClient} from "./zotero/client";
 import {syncTranslationHistory} from "./translation/history";
 import {readClipboardImage} from "./ocr/capture";
-import {recognizeWithFallback} from "./ocr/service";
+import {prewarmOcr, recognizeWithFallback} from "./ocr/service";
 import {openOcrResultDialog} from "./ui/ocr-dialog";
 import {applyQaBlockTheme, repairQaBlockAttributes} from "./qa/theme";
 import {NotebookAutomation} from "./automation/service";
@@ -293,6 +293,13 @@ export default class PdfZoteroPlugin extends Plugin implements PluginHost {
             this.startCalloutObserver();
             this.restartAutomation();
             this.refreshDock();
+            if (this.store.state.settings.ocrPrewarm !== false) {
+                window.setTimeout((): void => {
+                    void prewarmOcr(this.store.state.settings)
+                        .then(results => this.logDebug("ocr.prewarm", {results}))
+                        .catch(error => this.logDebug("ocr.prewarm.failed", {message: String(error?.message || error)}, "warn"));
+                }, 1500);
+            }
             const diagnostics = await this.collectDiagnostics();
             await this.saveReport("p0-ready-report", {
                 at: new Date().toISOString(),

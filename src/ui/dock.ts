@@ -13,6 +13,7 @@ import {getOcrHealth} from "../ocr/client";
 import type {OcrEngineConfig, OcrEngineId, OcrEngineMap, Settings} from "../types";
 import {openOcrHistory} from "./ocr-history";
 import {openMatrix} from "./matrix-workspace";
+import {openGraph} from "./graph-dialog";
 import {openTemplateManager} from "./template-manager";
 import {createNoteFromTemplate} from "../template/notes";
 import {syncTranslationHistory} from "../translation/history";
@@ -21,6 +22,9 @@ import {loadParseLibrary, readParseMarkdown, removeParseRecord, type ParseRecord
 import {openParseAsDocument, openParsePreview} from "./doc2x-preview";
 import {openParseTranslateDialog} from "./doc2x-translate-dialog";
 import {applyQaBlockTheme} from "../qa/theme";
+import {attachmentForZoteroItem, metaKeyForAttachment, statusForStat} from "../reading/index";
+import {fetchJournalFields, formatJournalTags, normalizeJournalName} from "../reading/journal";
+import {READING_STATUS_LABEL, formatDuration, progressOf, relativeTime} from "../reading/stats";
 
 function escapeHtml(text: string): string {
     return text.replace(/[&<>"']/g, ch => ({
@@ -124,6 +128,26 @@ function showDockContextMenu(x: number, y: number, items: DockMenuItem[]): void 
     setTimeout(() => document.addEventListener("pointerdown", close, true), 0);
 }
 
+function copyToClipboard(text: string, label: string): void {
+    void navigator.clipboard?.writeText(text)
+        .then(() => showMessage(`已复制${label}`, 1500))
+        .catch(() => showMessage("复制失败", 2500, "error"));
+}
+
+function bibtexFromFields(input: {title?: string; authors?: string[]; year?: string | number; venue?: string; doi?: string}): string {
+    const title = String(input.title || "");
+    const authors = (input.authors || []).filter(Boolean);
+    const year = String(input.year || "");
+    const fields: string[] = [];
+    if (title) fields.push(`  title = {${title}}`);
+    if (authors.length) fields.push(`  author = {${authors.join(" and ")}}`);
+    if (year) fields.push(`  year = {${year}}`);
+    if (input.venue) fields.push(`  journal = {${input.venue}}`);
+    if (input.doi) fields.push(`  doi = {${input.doi}}`);
+    const first = (authors[0] || "ref").replace(/[^A-Za-z]/g, "").toLowerCase();
+    return `@article{${first || "ref"}${year},\n${fields.join(",\n")}\n}`;
+}
+
 function formatTime(ts: number): string {
     if (!ts) {
         return "从未";
@@ -184,11 +208,62 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
         return haystack.includes(dockFilter.query.toLowerCase());
     }).sort((a, b) => Number(host.store.isZoteroItemPinned(b.key)) - Number(host.store.isZoteroItemPinned(a.key)));
     const ZOTERO_BATCH = 40;
-    const zoteroItemHtml = (item: (typeof filteredItems)[number]) => `
+    const progressHtml = (ratio: number, label: string) => {
+        const width = Math.round(Math.max(0, Math.min(1, ratio)) * 100);
+        return `<div class="pz-item-progress" title="${escapeHtml(label)}"><span style="width:${width}%"></span></div>`;
+    };
+    const ratingHtml = (key: string) => {
+        if (!key) return "";
+        const rating = host.store.itemMeta(key)?.rating || 0;
+        return `<span class="pz-rating" data-meta-key="${escapeHtml(key)}" data-rating="${rating}" title="点击打分，再点同一颗清除"><i data-rating="1" class="${rating >= 1 ? "is-on" : ""}">★</i><i data-rating="2" class="${rating >= 2 ? "is-on" : ""}">★</i><i data-rating="3" class="${rating >= 3 ? "is-on" : ""}">★</i><i data-rating="4" class="${rating >= 4 ? "is-on" : ""}">★</i><i data-rating="5" class="${rating >= 5 ? "is-on" : ""}">★</i></span>`;
+    };
+    const readingMetaText = (stat: ReturnType<typeof host.store.readingStat>) => {
+        if (!stat || !stat.totalSeconds) return "";
+        const parts = [formatDuration(stat.totalSeconds)];
+        if (stat.lastReadAt) parts.push(relativeTime(stat.lastReadAt));
+        return ` · ${parts.join(" · ")}`;
+    };
+    const metaMenuItems = (key: string) => {
+        if (!key) return [];
+        const meta = host.store.itemMeta(key);
+        const remark = meta?.remark || "";
+        return [
+            {
+                label: `评级${meta?.rating ? `（${"★".repeat(meta.rating)}）` : ""}`,
+                children: [0, 1, 2, 3, 4, 5].map(value => ({
+                    label: value ? "★".repeat(value) : "清除评级",
+                    action: () => {
+                        host.store.setItemRating(key, value);
+                        void host.store.save();
+                        host.refreshDock();
+                    },
+                })),
+            },
+            {
+                label: remark ? "编辑简记…" : "添加简记…",
+                action: () => {
+                    const next = window.prompt("简记（留空清除）", remark);
+                    if (next === null) return;
+                    host.store.setItemRemark(key, next);
+                    void host.store.save();
+                    host.refreshDock();
+                },
+            },
+        ];
+    };
+    const zoteroItemHtml = (item: (typeof filteredItems)[number]) => {
+        const linked = attachmentForZoteroItem(host.store, item.key);
+        const stat = linked ? host.store.readingStat(linked.id) : undefined;
+        const ratio = progressOf(stat);
+        const status = READING_STATUS_LABEL[statusForStat(host.store, stat)];
+        const percent = Math.round(ratio * 100);
+        return `
 <button draggable="true" class="pz-list-item${host.store.isZoteroItemPinned(item.key) ? " is-pinned" : ""}" data-zotero-key="${escapeHtml(item.key)}" title="打开该文献的 PDF 附件">
   <div class="pz-item-title">${host.store.isZoteroItemPinned(item.key) ? '<span class="pz-pin-badge">📌</span>' : ""}${escapeHtml(item.title || "(无标题)")}</div>
-  <div class="pz-item-meta">${escapeHtml(item.creators.join("; ") || "未知作者")}${item.year ? ` · ${escapeHtml(item.year)}` : ""} · ${escapeHtml(item.itemType)}</div>
+  ${ratio > 0 ? progressHtml(ratio, `阅读进度 ${percent}%`) : ""}
+  <div class="pz-item-foot"><span class="pz-item-meta">${escapeHtml(item.creators.join("; ") || "未知作者")}${item.year ? ` · ${escapeHtml(item.year)}` : ""} · ${status}${ratio > 0 ? ` ${percent}%` : ""}${readingMetaText(stat)}</span>${ratingHtml(item.key)}</div>
 </button>`;
+    };
     const zoteroItems = filteredItems.slice(0, ZOTERO_BATCH).map(zoteroItemHtml).join("");
     const collectionOptions = `<option value="">全部 Collection</option>` + collections
         .map(collection => `<option value="${escapeHtml(collection.key)}" ${dockFilter.collection === collection.key ? "selected" : ""}>${escapeHtml(collection.name)}</option>`)
@@ -196,10 +271,17 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
     const recentAttachments = host.store.recentAttachments();
     const attachmentCard = (attachment: (typeof recentAttachments)[number], current = false) => {
         const book = host.store.getBook(attachment.bookId);
+        const stat = host.store.readingStat(attachment.id);
+        const ratio = progressOf(stat);
+        const status = READING_STATUS_LABEL[statusForStat(host.store, stat)];
+        const key = metaKeyForAttachment(attachment);
+        const remark = host.store.itemMeta(key)?.remark || "";
+        const percent = Math.round(ratio * 100);
         return `
 <button draggable="true" class="pz-list-item pz-pdf-item${current ? " is-current" : ""}${attachment.pinned ? " is-pinned" : ""}" data-attachment-id="${escapeHtml(attachment.id)}" title="${escapeHtml(attachment.path || attachment.fileName)}">
   <div class="pz-item-title">${attachment.pinned ? '<span class="pz-pin-badge">📌</span>' : ""}${escapeHtml(book?.title || attachment.fileName)}${current ? `<span class="pz-current-badge">当前</span>` : ""}</div>
-  <div class="pz-item-meta">第 ${Math.max(1, attachment.lastPage || 1)} 页${attachment.lastOpenedAt ? ` · ${escapeHtml(formatTime(attachment.lastOpenedAt))}` : ""}</div>
+  ${ratio > 0 ? progressHtml(ratio, `阅读进度 ${percent}%`) : ""}
+  <div class="pz-item-foot"><span class="pz-item-meta">第 ${Math.max(1, attachment.lastPage || 1)} 页 · ${status}${ratio > 0 ? ` ${percent}%` : ""}${attachment.lastOpenedAt ? ` · ${escapeHtml(formatTime(attachment.lastOpenedAt))}` : ""}${readingMetaText(stat)}${remark ? ` · ${escapeHtml(remark)}` : ""}</span>${ratingHtml(key)}</div>
 </button>`;
     };
     const currentId = state.lastReaderAttachmentId;
@@ -378,13 +460,12 @@ export function renderDock(host: PluginHost, element: HTMLElement): void {
   <button class="pz-head-settings" data-act="settings" title="设置" aria-label="设置">⚙</button>
 </div>
 <div class="pz-row pz-dock-actions">
-  <button data-act="open-local">打开本地 PDF</button>
-  <button data-view="zotero">查找文献</button>
-  <button data-act="insert-citation">插入引文</button>
-  <button data-act="ocr-clipboard" title="识别剪贴板中的图片">OCR 剪贴板</button>
-  <button data-act="ocr-history" title="查看 OCR 历史与收藏">OCR 历史</button>
-      <button data-act="open-matrix" title="打开文献矩阵">文献矩阵</button>
-      <button data-act="open-template-manager" title="管理默认笔记模板">笔记模板</button>
+  <button data-act="open-local" title="打开本地 PDF"><span class="pz-act-icon">📄</span>打开 PDF</button>
+  <button data-act="open-matrix" title="打开文献矩阵"><span class="pz-act-icon">📊</span>文献矩阵</button>
+  <button data-act="open-graph" title="按 Connected Papers 的方式探索文献网络"><span class="pz-act-icon">🕸</span>文献网络</button>
+  <button data-act="insert-citation" title="在正文插入 Zotero 引文"><span class="pz-act-icon">✎</span>插入引文</button>
+  <button data-act="ocr-menu" title="OCR：识别剪贴板 / 历史"><span class="pz-act-icon">🔍</span>OCR</button>
+  <button data-act="open-template-manager" title="管理默认笔记模板"><span class="pz-act-icon">📝</span>笔记模板</button>
 </div>
 ${tabs}
 ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? recentView : dockFilter.view === "translations" ? translationsView : zoteroView}`;
@@ -425,6 +506,19 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
         else if (target.dataset.attachmentId) event.dataTransfer.setData("text/plain", `pz-pdf:${target.dataset.attachmentId}`);
     });
     element.onclick = async (event) => {
+        const ratingTarget = (event.target as HTMLElement).closest<HTMLElement>("i[data-rating]");
+        const ratingHolder = ratingTarget?.closest<HTMLElement>("[data-meta-key]");
+        if (ratingTarget && ratingHolder) {
+            event.preventDefault();
+            event.stopPropagation();
+            const key = ratingHolder.dataset.metaKey || "";
+            const current = Number(ratingHolder.dataset.rating || 0);
+            const picked = Number(ratingTarget.dataset.rating || 0);
+            host.store.setItemRating(key, picked === current ? 0 : picked);
+            await host.store.save();
+            host.refreshDock();
+            return;
+        }
         const target = (event.target as HTMLElement).closest<HTMLElement>("[data-act],[data-view],[data-zotero-key],[data-attachment-id],[data-translation-id],[data-parse-id]");
         if (!target) {
             return;
@@ -455,6 +549,15 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
                 openTemplateManager(host);
             } else if (action === "open-matrix") {
                 openMatrix(host);
+            } else if (action === "open-graph") {
+                openGraph(host, {});
+            } else if (action === "ocr-menu") {
+                const rect = target.getBoundingClientRect();
+                showDockContextMenu(rect.left, rect.bottom + 4, [
+                    {label: "识别剪贴板图片", action: () => host.ocrClipboardImage()},
+                    {label: "OCR 历史与收藏", action: () => openOcrHistory(host)},
+                    {label: "OCR 引擎设置", action: () => openSettings(host)},
+                ]);
             } else if (action === "ocr-clipboard") {
                 host.ocrClipboardImage();
             } else if (action === "ocr-history") {
@@ -533,6 +636,13 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
         }
         if (target.dataset.zoteroKey) {
             const itemKey = target.dataset.zoteroKey;
+            const zoteroRecord = host.store.state.zotero.items.find(entry => entry.key === itemKey);
+            const zoteroCsl = (zoteroRecord?.csl || {}) as Record<string, any>;
+            const copyTitle = String(zoteroRecord?.title || zoteroCsl.title || "");
+            const copyDoi = String(zoteroCsl.DOI || zoteroRecord?.doi || "");
+            const copyAuthors = Array.isArray(zoteroRecord?.creators) ? zoteroRecord!.creators : [];
+            const copyYear = zoteroRecord?.year || zoteroCsl.issued?.["date-parts"]?.[0]?.[0] || "";
+            const copyVenue = String(zoteroCsl["container-title"] || "");
             const translations = translationsForZotero(itemKey);
             const attachment = attachmentForZotero(itemKey);
             const pinned = host.store.isZoteroItemPinned(itemKey);
@@ -547,6 +657,64 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
                 {label: "用所选条目创建参考文献", action: () => host.openCitationDialog(undefined, [itemKey]), disabled: !host.store.state.zotero.items.some(item => item.key === itemKey)},
                 {label: "用模板创建笔记", action: () => createNoteFromTemplate(host, itemKey), disabled: !host.store.state.zotero.items.some(item => item.key === itemKey)},
                 {label: "Doc2X", children: doc2xMenuItems(doc2xTargetForZotero(itemKey))},
+                {
+                    label: "获取期刊标签",
+                    disabled: !host.store.state.settings.journalApiKey,
+                    action: async () => {
+                        const record = host.store.state.zotero.items.find(entry => entry.key === itemKey);
+                        const csl = (record?.csl || {}) as Record<string, any>;
+                        const venue = String(csl["container-title"] || csl.publisher || "");
+                        if (!venue) {
+                            showMessage("该条目没有期刊 / 会议名称", 3000);
+                            return;
+                        }
+                        const fields = await fetchJournalFields(host.store.state.settings, venue);
+                        if (!fields) {
+                            showMessage("未获取到期刊数据，请检查 easyScholar 密钥与网络", 4500, "error");
+                            return;
+                        }
+                        host.store.setJournalEntry(normalizeJournalName(venue), fields);
+                        await host.store.save();
+                        const label = formatJournalTags(fields, host.store.state.settings.journalMap, host.store.state.settings.journalFields);
+                        if (label) {
+                            showMessage(label, 3500);
+                        } else {
+                            const available = Object.keys(fields).slice(0, 8).join(", ");
+                            showMessage(`已缓存，但该刊没有「${host.store.state.settings.journalFields}」这些字段。可用字段：${available}（在设置里调整显示字段）`, 8000);
+                        }
+                        host.refreshDock();
+                    },
+                },
+                ...metaMenuItems(itemKey),
+                {
+                    label: "复制",
+                    children: [
+                        {label: "复制标题", disabled: !copyTitle, action: () => copyToClipboard(copyTitle, "标题")},
+                        {label: "复制 DOI", disabled: !copyDoi, action: () => copyToClipboard(copyDoi, " DOI")},
+                        {label: "复制作者", disabled: !copyAuthors.length, action: () => copyToClipboard(copyAuthors.join("; "), "作者")},
+                        {label: "复制 BibTeX", disabled: !copyTitle, action: () => copyToClipboard(bibtexFromFields({
+                            title: copyTitle,
+                            authors: copyAuthors,
+                            year: copyYear,
+                            venue: copyVenue,
+                            doi: copyDoi,
+                        }), " BibTeX")},
+                    ],
+                },
+                {
+                    label: "文献网络（先期 / 衍生）",
+                    action: () => {
+                        const record = host.store.state.zotero.items.find(entry => entry.key === itemKey);
+                        const csl = (record?.csl || {}) as Record<string, any>;
+                        const doi = String(csl.DOI || record?.doi || "");
+                        const title = String(record?.title || csl.title || "");
+                        if (!doi && !title) {
+                            showMessage("该条目没有 DOI 或标题，无法建立网络", 3000);
+                            return;
+                        }
+                        openGraph(host, {doi, title});
+                    },
+                },
                 ...(attachment ? [{label: "打开 PDF", action: () => host.openAttachment(attachment)}] : []),
             ]);
             return;
@@ -555,6 +723,14 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
         if (!attachment) return;
         const translations = translationsForAttachment(attachment.id);
         const itemKey = attachment.zotero?.itemKey || host.store.getBook(attachment.bookId)?.zoteroKey || "";
+        const attachmentRecord = host.store.state.zotero.items.find(entry => entry.key === itemKey);
+        const attachmentCsl = (attachmentRecord?.csl || {}) as Record<string, any>;
+        const attachmentBook = host.store.getBook(attachment.bookId);
+        const attachmentTitle = String(attachmentRecord?.title || attachmentBook?.title || attachment.fileName || "");
+        const attachmentDoi = String(attachmentCsl.DOI || attachmentRecord?.doi || "");
+        const attachmentAuthors = Array.isArray(attachmentRecord?.creators) ? attachmentRecord!.creators : [];
+        const attachmentYear = attachmentRecord?.year || attachmentCsl.issued?.["date-parts"]?.[0]?.[0] || "";
+        const attachmentVenue = String(attachmentCsl["container-title"] || "");
         showDockContextMenu(event.clientX, event.clientY, [
             {label: "打开译文", action: () => translations.length ? openTranslationOutput(translations[0]) : showMessage("该 PDF 还没有译文", 2500), disabled: !translations.length},
             {label: attachment.pinned ? "取消置顶" : "置顶", action: () => {
@@ -566,6 +742,37 @@ ${dockFilter.view === "reading" ? readingView : dockFilter.view === "recent" ? r
             {label: "用所选条目创建参考文献", action: () => host.openCitationDialog(undefined, [itemKey]), disabled: !itemKey},
             {label: "用模板创建笔记", action: () => itemKey ? createNoteFromTemplate(host, itemKey) : undefined, disabled: !itemKey},
             {label: "Doc2X", children: doc2xMenuItems(doc2xTargetForAttachment(attachment))},
+            ...metaMenuItems(metaKeyForAttachment(attachment)),
+            {
+                label: "复制",
+                children: [
+                    {label: "复制标题", disabled: !attachmentTitle, action: () => copyToClipboard(attachmentTitle, "标题")},
+                    {label: "复制 DOI", disabled: !attachmentDoi, action: () => copyToClipboard(attachmentDoi, " DOI")},
+                    {label: "复制作者", disabled: !attachmentAuthors.length, action: () => copyToClipboard(attachmentAuthors.join("; "), "作者")},
+                    {label: "复制 BibTeX", disabled: !attachmentTitle, action: () => copyToClipboard(bibtexFromFields({
+                        title: attachmentTitle,
+                        authors: attachmentAuthors,
+                        year: attachmentYear,
+                        venue: attachmentVenue,
+                        doi: attachmentDoi,
+                    }), " BibTeX")},
+                ],
+            },
+            {
+                label: "文献网络（先期 / 衍生）",
+                action: () => {
+                    const record = host.store.state.zotero.items.find(entry => entry.key === itemKey);
+                    const csl = (record?.csl || {}) as Record<string, any>;
+                    const book = host.store.getBook(attachment.bookId);
+                    const doi = String(csl.DOI || "");
+                    const title = String(record?.title || book?.title || attachment.fileName || "");
+                    if (!doi && !title) {
+                        showMessage("这份 PDF 没有 DOI 或标题，无法建立网络", 3000);
+                        return;
+                    }
+                    openGraph(host, {doi, title});
+                },
+            },
         ]);
     };
     element.addEventListener("contextmenu", onDockContextMenu, true);

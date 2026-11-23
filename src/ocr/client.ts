@@ -37,6 +37,8 @@ export interface OcrHealth {
     version?: string;
     engine?: string;
     modelReady?: boolean;
+    /** Service is alive but the model is still loading. */
+    loading?: boolean;
     capabilities?: {formula?: boolean; text?: boolean; mixed?: boolean};
     error?: string;
     pid?: number;
@@ -78,6 +80,7 @@ export async function getOcrHealth(settings: Settings, engine: OcrEngineId = "pi
             version: String(data?.version || ""),
             engine: String(data?.engine || ""),
             modelReady: data?.modelReady !== false,
+            loading: Boolean(data?.loading),
             capabilities: data?.capabilities && typeof data.capabilities === "object" ? data.capabilities : undefined,
             error: response.ok ? String(data?.error || "") : `HTTP ${response.status}`,
             pid: Number.isFinite(Number(data?.pid)) ? Number(data.pid) : undefined,
@@ -85,6 +88,61 @@ export async function getOcrHealth(settings: Settings, engine: OcrEngineId = "pi
         };
     } catch (error: any) {
         return {ok: false, error: error?.name === "AbortError" ? "OCR 服务连接超时" : (error?.message || String(error))};
+    } finally {
+        window.clearTimeout(timer);
+    }
+}
+
+async function downscaleBlob(blob: Blob, maxEdge: number): Promise<Blob> {
+    if (!maxEdge || maxEdge <= 0) return blob;
+    try {
+        const createBitmap = (globalThis as any).createImageBitmap as ((input: Blob) => Promise<any>) | undefined;
+        if (!createBitmap) return blob;
+        const bitmap = await createBitmap(blob);
+        const longest = Math.max(Number(bitmap.width) || 0, Number(bitmap.height) || 0);
+        if (!longest || longest <= maxEdge) {
+            bitmap.close?.();
+            return blob;
+        }
+        const scale = maxEdge / longest;
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) {
+            bitmap.close?.();
+            return blob;
+        }
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close?.();
+        const resized = await new Promise<Blob | null>(resolve => canvas.toBlob(result => resolve(result), "image/png"));
+        return resized || blob;
+    } catch (error) {
+        console.warn("[pdf-zotero] OCR image downscale failed", error);
+        return blob;
+    }
+}
+
+export async function warmupOcrEngine(settings: Settings, engine: OcrEngineId, timeoutMs = 300_000): Promise<OcrHealth> {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
+    try {
+        const response = await fetch(`${ocrServiceUrl(settings, engine)}/warmup`, {signal: controller.signal});
+        const data = await response.json().catch((): any => ({}));
+        if (!response.ok) {
+            return {ok: false, error: `HTTP ${response.status}`, loading: false};
+        }
+        return {
+            ok: data?.ok !== false && data?.modelReady !== false,
+            version: String(data?.version || ""),
+            engine: String(data?.engine || ""),
+            modelReady: data?.modelReady !== false,
+            loading: Boolean(data?.loading),
+            error: String(data?.error || ""),
+            pid: Number.isFinite(Number(data?.pid)) ? Number(data.pid) : undefined,
+        };
+    } catch (error: any) {
+        return {ok: false, loading: false, error: error?.name === "AbortError" ? "OCR 模型加载超时" : (error?.message || String(error))};
     } finally {
         window.clearTimeout(timer);
     }
@@ -128,7 +186,8 @@ export async function recognizeWithEngine(
     blob: Blob,
     options: {mode?: "auto" | "formula" | "text"; source?: "pdf-region" | "clipboard"} = {},
 ): Promise<OcrResult> {
-    const imageBase64 = await blobToBase64(blob);
+    const preparedBlob = await downscaleBlob(blob, Number(settings.ocrMaxImageEdge) || 0);
+    const imageBase64 = await blobToBase64(preparedBlob);
     const group = serviceGroupForEngine(settings, engine);
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), Math.max(1000, Number(settings.ocrTimeoutMs) || 120_000));

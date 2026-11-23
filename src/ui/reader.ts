@@ -17,6 +17,8 @@ import {loadAttachmentBytes} from "../pdf/source";
 import {fileExists, getPathForFile, openExternalUrl, requireNode} from "../runtime";
 import {insertImageAtCursor, insertMarkdownAtCursor, uploadPngAsset} from "../siyuan";
 import {newId} from "../storage";
+import {recordReading} from "../reading/stats";
+import {ReadingTracker} from "../reading/tracker";
 import type {Annotation, DisplayTextFormat, LinkCopyFormat, QaAttachment, QaMessage, QaThread, ReaderOpenData, ScreenshotRegion, SelectionAnchor} from "../types";
 import {chatWithSiyuanAIStream} from "../automation/provider";
 import {applyQaBlockTheme} from "../qa/theme";
@@ -86,6 +88,7 @@ export class PdfReader {
     private destroyPdf: (() => Promise<void>) | null = null;
     private zoom = DEFAULT_ZOOM;
     private currentPage = 1;
+    private readingTracker: ReadingTracker | null = null;
     private selectedColor = DEFAULT_COLOR;
     private selection: SelectionAnchor | null = null;
     private selectionRect: DOMRect | null = null;
@@ -416,6 +419,7 @@ export class PdfReader {
             return;
         }
         this.destroyed = true;
+        this.stopReadingTracker();
         this.restoreToolbar();
         this.savePositionNow();
         if (!preserveSession) {
@@ -544,6 +548,7 @@ export class PdfReader {
             }
         });
         this.pagesElement.addEventListener("mousemove", (event) => this.onPagesMouseMove(event), {passive: true});
+        this.pagesElement.addEventListener("pointerdown", () => this.readingTracker?.markActivity(), {passive: true});
         this.pagesElement.addEventListener("mouseleave", this.dismissPreview);
         this.pagesElement.addEventListener("click", (event) => this.onPagesClick(event));
         this.pagesElement.addEventListener("contextmenu", (event) => this.onContextMenu(event));
@@ -732,6 +737,7 @@ export class PdfReader {
         });
         this.outline = await loadOutline(this.pdf);
         this.renderSide();
+        this.startReadingTracker();
         const setIntervalFn = requireNode("timers")?.setInterval || globalThis.setInterval;
         this.reconcileTimer = setIntervalFn((): void => {
             void this.reconcileScreenshotRegions();
@@ -1429,6 +1435,7 @@ export class PdfReader {
             if (!this.pagesElement.isConnected || container.width < 100 || container.height < 100) {
                 return;
             }
+            this.readingTracker?.markActivity();
             const center = container.top + container.height / 2;
             let best = this.currentPage;
             let bestDistance = Number.POSITIVE_INFINITY;
@@ -1475,6 +1482,61 @@ export class PdfReader {
         void this.host.store.save();
     }
 
+    private onReadingVisibility = (): void => {
+        if (this.element.ownerDocument.visibilityState === "visible") {
+            this.readingTracker?.markActivity();
+        }
+    };
+
+    private onReadingFocus = (): void => {
+        this.readingTracker?.markActivity();
+    };
+
+    private startReadingTracker(): void {
+        this.stopReadingTracker();
+        const settings = this.host.store.state.settings;
+        if (!settings.readingTrackEnabled) return;
+        const attachmentId = this.data.attachmentId;
+        const totalPages = this.pdf?.numPages || 0;
+        if (totalPages > 0) {
+            this.host.store.ensureReadingStat(attachmentId, totalPages);
+        }
+        const tracker = new ReadingTracker({
+            intervalSeconds: 10,
+            idleSeconds: settings.readingIdleSeconds || 120,
+            persistSeconds: 60,
+            getPage: () => this.currentPage,
+            getPages: () => this.pdf?.numPages || this.pages.length || 0,
+            isActive: () => {
+                if (!this.pagesElement?.isConnected) return false;
+                const doc = this.element.ownerDocument;
+                if (doc.visibilityState && doc.visibilityState !== "visible") return false;
+                if (typeof doc.hasFocus === "function" && !doc.hasFocus()) return false;
+                const rect = this.pagesElement.getBoundingClientRect();
+                return rect.width >= 100 && rect.height >= 100;
+            },
+            onChange: (page, pages, seconds) => {
+                const stat = this.host.store.ensureReadingStat(attachmentId, pages);
+                this.host.store.setReadingStat(attachmentId, recordReading(stat, {page, pages, seconds}));
+            },
+            onPersist: () => {
+                void this.host.store.save();
+            },
+        });
+        this.readingTracker = tracker;
+        tracker.start();
+        this.element.ownerDocument.addEventListener("visibilitychange", this.onReadingVisibility);
+        window.addEventListener("focus", this.onReadingFocus);
+    }
+
+    private stopReadingTracker(): void {
+        if (!this.readingTracker) return;
+        this.readingTracker.stop();
+        this.readingTracker = null;
+        this.element.ownerDocument.removeEventListener("visibilitychange", this.onReadingVisibility);
+        window.removeEventListener("focus", this.onReadingFocus);
+    }
+
     private scrollToPage(page: number, smooth = true, record = true): void {
         const clamped = clamp(page, 1, Math.max(1, this.pages.length));
         const info = this.pages[clamped - 1];
@@ -1486,6 +1548,7 @@ export class PdfReader {
         }
         this.currentPage = clamped;
         this.pageInput.value = String(clamped);
+        this.readingTracker?.markActivity();
         this.updateCompactMeta();
         this.suppressScrollTrackingUntil = performance.now() + (smooth ? 500 : 120);
         const target = info.element.offsetTop - 8;

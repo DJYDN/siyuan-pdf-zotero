@@ -1,12 +1,12 @@
 export const PLUGIN_NAME = "siyuan-pdf-zotero";
 export const PLUGIN_DISPLAY_NAME = "PDF × Zotero";
-export const VERSION = "0.9.62";
+export const VERSION = "0.9.96";
 
 export const TAB_TYPE = "pdf_zotero_reader";
 export const DOCK_TYPE = "pdf_zotero_dock";
 export const STORAGE_KEY = "state-v1";
-export const STATE_VERSION = 4;
-export const MATRIX_SCHEMA_VERSION = 1;
+export const STATE_VERSION = 6;
+export const MATRIX_SCHEMA_VERSION = 3;
 export const MATRIX_MIGRATION_BACKUP_KEY = "matrix-migration-backup-v1";
 
 /** Custom SiYuan URL used by notes. Format: siyuan://plugins/<plugin>/annotation?id=<annotationId> */

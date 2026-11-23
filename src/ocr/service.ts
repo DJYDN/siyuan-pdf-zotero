@@ -1,8 +1,10 @@
 import {fileExists, requireNode} from "../runtime";
 import type {OcrEngineId, Settings} from "../types";
 import {
+    enabledEngineIds,
     engineConfig,
     enginesForMode,
+    formulaEngineOrder,
     OCR_ENGINE_DEFS,
     OCR_ENGINE_IDS,
     serviceGroupForEngine,
@@ -13,6 +15,7 @@ import {
     getOcrHealth,
     ocrServiceUrl,
     recognizeWithEngine,
+    warmupOcrEngine,
     OcrHttpError,
     type OcrHealth,
     type OcrResult,
@@ -225,11 +228,11 @@ function sleep(ms: number): Promise<void> {
     return new Promise(resolve => window.setTimeout(resolve, ms));
 }
 
-async function waitForHealth(settings: Settings, engine: OcrEngineId, timeoutMs: number): Promise<OcrHealth> {
+async function waitForService(settings: Settings, engine: OcrEngineId, timeoutMs: number): Promise<OcrHealth> {
     const started = Date.now();
     let last: OcrHealth = {ok: false, error: "OCR 服务连接超时"};
     while (Date.now() - started < timeoutMs) {
-        await sleep(600);
+        await sleep(2000);
         last = await getOcrHealth(settings, engine, 5000);
         if (last.ok) {
             return last;
@@ -258,67 +261,126 @@ function engineBundleError(settings: Settings, engine: OcrEngineId): string {
     return "";
 }
 
-export async function ensureOcrEngine(settings: Settings, engine: OcrEngineId): Promise<{ok: boolean; started: boolean; error?: string; pid?: number}> {
+type EnsureOcrResult = {ok: boolean; started: boolean; error?: string; pid?: number};
+const ensureInflight = new Map<OcrEngineId, Promise<EnsureOcrResult>>();
+
+async function ensureOcrEngineOnce(settings: Settings, engine: OcrEngineId): Promise<EnsureOcrResult> {
     const bundleError = engineBundleError(settings, engine);
     if (bundleError) {
         return {ok: false, started: false, error: bundleError};
     }
-    const health = await getOcrHealth(settings, engine);
-    if (health.ok) {
-        return {ok: true, started: false, pid: health.pid};
-    }
-    const group = serviceGroupForEngine(settings, engine);
-    if (!group) {
-        return {ok: false, started: false, error: `${OCR_ENGINE_DEFS[engine].name} 未配置服务目录`};
-    }
-    if (!group.autoStart) {
-        return {ok: false, started: false, error: "OCR 服务未运行，且未开启自动启动"};
-    }
-    const paths = resolveServicePaths(settings, engine);
-    const cp = requireNode("child_process");
-    if (!cp?.spawn) {
-        return {ok: false, started: false, error: "当前环境没有 child_process，无法启动本地服务"};
-    }
-    let child: any;
-    try {
-        if (settings.ocrStartCommand?.trim()) {
-            child = cp.spawn(settings.ocrStartCommand.trim(), {
-                cwd: group.dir,
-                shell: true,
-                detached: true,
-                windowsHide: true,
-                stdio: "ignore",
-            });
-        } else {
-            if (!paths.python) {
-                return {ok: false, started: false, error: "未找到 Python 运行时（可配置共享运行时目录）"};
-            }
-            if (!paths.script) {
-                return {ok: false, started: false, error: `未找到服务脚本（${OCR_ENGINE_DEFS[engine].scriptCandidates.join(" / ")}）`};
-            }
-            const logDir = ocrLogDir(settings);
-            try {
-                requireNode("fs")?.mkdirSync?.(logDir, {recursive: true});
-            } catch {
-                // logging is best-effort
-            }
-            child = cp.spawn(paths.python, [paths.script, String(paths.port)], {
-                cwd: group.dir,
-                detached: true,
-                windowsHide: true,
-                stdio: "ignore",
-            });
+    let started = false;
+    let health = await getOcrHealth(settings, engine);
+    if (!health.ok) {
+        const group = serviceGroupForEngine(settings, engine);
+        if (!group) {
+            return {ok: false, started: false, error: `${OCR_ENGINE_DEFS[engine].name} 未配置服务目录`};
         }
-        child.unref?.();
-    } catch (error: any) {
-        return {ok: false, started: false, error: error?.message || String(error)};
+        if (!group.autoStart) {
+            return {ok: false, started: false, error: "OCR 服务未运行，且未开启自动启动"};
+        }
+        const paths = resolveServicePaths(settings, engine);
+        const cp = requireNode("child_process");
+        if (!cp?.spawn) {
+            return {ok: false, started: false, error: "当前环境没有 child_process，无法启动本地服务"};
+        }
+        let child: any;
+        try {
+            if (settings.ocrStartCommand?.trim()) {
+                child = cp.spawn(settings.ocrStartCommand.trim(), {
+                    cwd: group.dir,
+                    shell: true,
+                    detached: true,
+                    windowsHide: true,
+                    stdio: "ignore",
+                });
+            } else {
+                if (!paths.python) {
+                    return {ok: false, started: false, error: "未找到 Python 运行时（可配置共享运行时目录）"};
+                }
+                if (!paths.script) {
+                    return {ok: false, started: false, error: `未找到服务脚本（${OCR_ENGINE_DEFS[engine].scriptCandidates.join(" / ")}）`};
+                }
+                const logDir = ocrLogDir(settings);
+                try {
+                    requireNode("fs")?.mkdirSync?.(logDir, {recursive: true});
+                } catch {
+                    // logging is best-effort
+                }
+                child = cp.spawn(paths.python, [paths.script, String(paths.port)], {
+                    cwd: group.dir,
+                    detached: true,
+                    windowsHide: true,
+                    stdio: "ignore",
+                });
+            }
+            child.unref?.();
+            started = true;
+        } catch (error: any) {
+            return {ok: false, started: false, error: error?.message || String(error)};
+        }
+        const timeout = START_TIMEOUT_MS[engine] || 40_000;
+        health = await waitForService(settings, engine, timeout);
+        if (!health.ok) {
+            return {ok: false, started: true, error: `OCR 服务启动超时：${ocrServiceUrl(settings, engine)}${health.error ? `（${health.error}）` : ""}`};
+        }
     }
+    // Service is alive. Older packages report no modelReady/loading fields; treat them as ready.
+    if (health.modelReady !== false && !health.loading) {
+        return {ok: true, started, pid: health.pid};
+    }
+    // Model is still loading: ask the service to finish loading once (single heavy operation).
     const timeout = START_TIMEOUT_MS[engine] || 40_000;
-    const result = await waitForHealth(settings, engine, timeout);
-    if (result.ok) {
-        return {ok: true, started: true, pid: result.pid};
+    const warmed = await warmupOcrEngine(settings, engine, timeout);
+    if (warmed.ok) {
+        return {ok: true, started, pid: warmed.pid || health.pid};
     }
-    return {ok: false, started: true, error: `OCR 服务启动超时：${ocrServiceUrl(settings, engine)}${result.error ? `（${result.error}）` : ""}`};
+    // Backward compatibility: pre-0.9.63 packages have no /warmup endpoint; the OCR call itself loads the model.
+    if (/HTTP 404/.test(warmed.error || "")) {
+        return {ok: true, started, pid: health.pid};
+    }
+    return {ok: false, started, error: warmed.error || "OCR 模型加载失败"};
+}
+
+/** Single-flight: concurrent OCR / prewarm / detection calls share one startup. */
+export function ensureOcrEngine(settings: Settings, engine: OcrEngineId): Promise<EnsureOcrResult> {
+    const existing = ensureInflight.get(engine);
+    if (existing) {
+        return existing;
+    }
+    const promise = ensureOcrEngineOnce(settings, engine).finally(() => {
+        if (ensureInflight.get(engine) === promise) {
+            ensureInflight.delete(engine);
+        }
+    });
+    ensureInflight.set(engine, promise);
+    return promise;
+}
+
+/** Preferred engines to warm on startup: first formula engine + the text engine. */
+export function ocrPrewarmTargets(settings: Settings): OcrEngineId[] {
+    const enabled = enabledEngineIds(settings);
+    const targets: OcrEngineId[] = [];
+    const formula = formulaEngineOrder(settings).find(id => enabled.includes(id));
+    if (formula) {
+        targets.push(formula);
+    }
+    const textPreferred = enabled.includes(settings.ocrTextEngine as OcrEngineId)
+        ? settings.ocrTextEngine as OcrEngineId
+        : enabled.find(id => OCR_ENGINE_DEFS[id].capabilities.text);
+    if (textPreferred && !targets.includes(textPreferred)) {
+        targets.push(textPreferred);
+    }
+    return targets;
+}
+
+export async function prewarmOcr(settings: Settings): Promise<Array<{engine: OcrEngineId; ok: boolean; error?: string}>> {
+    const targets = ocrPrewarmTargets(settings);
+    const results = await Promise.all(targets.map(async engine => {
+        const result = await ensureOcrEngine(settings, engine);
+        return {engine, ok: result.ok, error: result.error};
+    }));
+    return results;
 }
 
 /** Legacy alias: ensure the primary engine for the current settings. */
@@ -406,10 +468,18 @@ export async function recognizeWithFallback(
             continue;
         }
         const started = Date.now();
-        const server = await ensureOcrEngine(settings, engine);
-        if (!server.ok) {
-            attempts.push({engine, ok: false, error: server.error || "服务不可用"});
-            continue;
+        if (engines.indexOf(engine) > 0) {
+            const health = await getOcrHealth(settings, engine);
+            if (!health.ok || health.modelReady === false) {
+                attempts.push({engine, ok: false, skipped: "未预热，已跳过（不自动冷启动备用引擎）"});
+                continue;
+            }
+        } else {
+            const server = await ensureOcrEngine(settings, engine);
+            if (!server.ok) {
+                attempts.push({engine, ok: false, error: server.error || "服务不可用"});
+                continue;
+            }
         }
         try {
             const result = await recognizeWithEngine(settings, engine, blob, {...options, mode});

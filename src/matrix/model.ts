@@ -17,6 +17,15 @@ export const RESEARCH_COLUMNS: Array<Pick<MatrixColumn, "name" | "type" | "sourc
     {name: "我的评价", type: "longtext", source: "research"},
 ];
 
+export const READING_SYSTEM_COLUMNS: MatrixColumn[] = [
+    {id: "progress", name: "进度", type: "text", visible: true, system: true, source: "zotero", width: 80},
+    {id: "dwell", name: "时长", type: "text", visible: true, system: true, source: "zotero", width: 90},
+    {id: "lastRead", name: "最近阅读", type: "text", visible: true, system: true, source: "zotero", width: 110},
+    {id: "annotations", name: "标注", type: "number", visible: true, system: true, source: "zotero", width: 70},
+    {id: "journal", name: "期刊标签", type: "text", visible: true, system: true, source: "zotero", width: 150},
+    {id: "readStatus", name: "阅读状态", type: "select", visible: true, system: true, source: "zotero", width: 90, options: ["未读", "在读", "已读"]},
+];
+
 export function defaultMatrixColumns(): MatrixColumn[] {
     const system: MatrixColumn[] = [
         {id: "title", name: "标题", type: "text", visible: true, system: true, source: "zotero", width: 260},
@@ -27,6 +36,7 @@ export function defaultMatrixColumns(): MatrixColumn[] {
         {id: "pdf", name: "PDF", type: "text", visible: true, system: true, source: "zotero", width: 60},
         {id: "note", name: "笔记", type: "text", visible: true, system: true, source: "zotero", width: 60},
         {id: "citation", name: "引文", type: "text", visible: true, system: true, source: "zotero", width: 120},
+        ...READING_SYSTEM_COLUMNS.map(column => ({...column})),
     ];
     return [...system, ...RESEARCH_COLUMNS.map(item => ({
         id: newId("mxcol"),
@@ -88,6 +98,12 @@ export function migrateMatrixProject(raw: any): {project: MatrixProject; changed
             if (!Array.isArray(view.canvas.edges)) { view.canvas.edges = []; changed = true; }
             view.canvas.nodes = view.canvas.nodes.filter(node => node && node.id).map(node => ({...node, x: Number(node.x) || 0, y: Number(node.y) || 0}));
             view.canvas.edges = view.canvas.edges.filter(edge => edge && edge.id && edge.from && edge.to);
+        }
+    }
+    for (const required of READING_SYSTEM_COLUMNS) {
+        if (!project.columns.some(column => column.id === required.id)) {
+            project.columns.push({...required});
+            changed = true;
         }
     }
     if (project.schemaVersion !== MATRIX_SCHEMA_VERSION) {

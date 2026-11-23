@@ -2,7 +2,7 @@
   "name": "siyuan-pdf-zotero",
   "author": "DJYDN",
   "url": "https://github.com/DJYDN/siyuan-pdf-zotero",
-  "version": "0.9.64",
+  "version": "0.9.96",
   "minAppVersion": "3.8.7",
   "backends": [
     "windows"
@@ -16,8 +16,8 @@
     "zh-CN": "PDF × Zotero"
   },
   "description": {
-    "default": "PDF reader with PDF++ style excerpts, local OCR (Pix2Text / UniMERNet / Texo), free selection translation, local whole-document PDF2zh translation, Zotero citations, literature matrix, note templates, PDF Q&A and AI automation.",
-    "zh-CN": "PDF 阅读与 PDF++ 式摘录回跳、本地 OCR（Pix2Text / UniMERNet / Texo）、免费划词翻译、本地 PDF2zh 整篇翻译、Zotero 引文、文献矩阵、笔记模板、PDF 问答与 AI 自动化。"
+    "default": "PDF reader with PDF++ style excerpts, local OCR (Pix2Text / UniMERNet / Texo), free selection translation, local whole-document PDF2zh translation, Zotero citations, literature matrix, citation graph, reading tracker, note templates, PDF Q&A and AI automation.",
+    "zh-CN": "PDF 阅读与 PDF++ 式摘录回跳、本地 OCR（Pix2Text / UniMERNet / Texo）、免费划词翻译、本地 PDF2zh 整篇翻译、Zotero 引文、文献矩阵、引文网络图谱、阅读记录、笔记模板、PDF 问答与 AI 自动化。"
   },
   "readme": {
     "default": "README.md",
